@@ -278,7 +278,7 @@ def test_stats(net, data_loader, fSinVals='', save_feats=0, fsave_feats=''):
             if math.isnan(off_diag_f_total):
               print("NaN")
               pdb.set_trace()
-    
+
     on_diag_total /= bt_cnt
     off_diag_total /= bt_cnt
     on_diag_f_total /= bt_cnt
@@ -458,7 +458,8 @@ if __name__ == '__main__':
         corr_neg_one_str = 'neg_corr_'
     else:
         corr_neg_one_str = ''
-    save_name_pre = '{}{}_{}_{}_{}'.format(corr_neg_one_str, lmbda, feature_dim, batch_size, dataset)
+    # save_name_pre = '{}{}_{}_{}_{}'.format(corr_neg_one_str, lmbda, feature_dim, batch_size, dataset)
+    save_name_pre = args.wb_name
     
     if not os.path.exists('results'):
         os.mkdir('results')
