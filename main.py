@@ -59,8 +59,11 @@ def train(net, data_loader, train_optimizer):
         # Barlow Twins
         
         # normalize the representations along the batch dimension
-        out_1_norm = (out_1 - out_1.mean(dim=0)) / out_1.std(dim=0)
-        out_2_norm = (out_2 - out_2.mean(dim=0)) / out_2.std(dim=0)
+        out_1_norm = out_1 - out_1.mean(dim=0) 
+        out_2_norm = out_2 - out_2.mean(dim=0)
+        if args.norm_std:
+          out_1_norm /= out_1.std(dim=0)
+          out_2_norm /= out_2.std(dim=0)
         
         # cross-correlation matrix
         c = torch.matmul(out_1_norm.T, out_2_norm) / batch_size
@@ -164,8 +167,11 @@ def test(net, memory_data_loader, test_data_loader, epoch):
             bt_cnt += 1
 
             # normalize the representations along the batch dimension
-            out_norm = (out - out.mean(dim=0)) / out.std(dim=0)
-            feat_norm = (feature - feature.mean(dim=0)) / feature.std(dim=0)
+            out_norm = (out - out.mean(dim=0))
+            feat_norm = (feature - feature.mean(dim=0))
+            if args.norm_std:
+              out_norm /= out.std(dim=0)
+              feat_norm /= feature.std(dim=0)
             # cross-correlation matrix
             c = torch.matmul(out_norm.T, out_norm) / batch_size
             cf = torch.matmul(feat_norm.T, feat_norm) / batch_size
@@ -237,12 +243,15 @@ def test_stats(net, data_loader, fSinVals='', save_feats=0, fsave_feats=''):
             feature, out = net(data)
 
             # normalize the representations along the batch dimension
-            o_std = out.std(dim=0)
-            o_std[o_std==0] = 1
-            out_norm = (out - out.mean(dim=0)) / o_std
-            f_std = feature.std(dim=0)
-            f_std[f_std==0] = 1
-            feat_norm = (feature - feature.mean(dim=0)) / f_std
+            out_norm = out - out.mean(dim=0)
+            feat_norm = feature - feature.mean(dim=0)
+            if args.norm_std:
+              f_std = feature.std(dim=0)
+              f_std[f_std==0] = 1
+              o_std = out.std(dim=0)
+              o_std[o_std==0] = 1
+              out_norm /= o_std
+              feat_norm /= f_std
             # cross-correlation matrix
             c = torch.matmul(out_norm.T, out_norm) / batch_size
             cf = torch.matmul(feat_norm.T, feat_norm) / batch_size
@@ -275,6 +284,9 @@ def test_stats(net, data_loader, fSinVals='', save_feats=0, fsave_feats=''):
             off_diag_total += off_diag.item()
             on_diag_f_total += on_diag_f.item()
             off_diag_f_total += off_diag_f.item()
+
+            pdb.set_trace()
+
             if math.isnan(off_diag_f_total):
               print("NaN")
               pdb.set_trace()
@@ -361,6 +373,8 @@ if __name__ == '__main__':
                         help="Whether to drop the loss term for on-diag entries.")
     parser.add_argument('--loss-no-off-diag', default=0, type=int, choices=[0,1],
                         help="Whether to drop the loss term for off-diag entries.")
+    parser.add_argument('--norm-std', default=1, type=int, choices=[0,1],
+                        help="Whether to normalize per dim std=1.")
 
     # logging
     parser.add_argument('--project', default='nonContrastive')
