@@ -68,6 +68,7 @@ def train(net, data_loader, train_optimizer):
         # cross-correlation matrix
         c = torch.matmul(out_1_norm.T, out_2_norm) / batch_size
 
+        pdb.set_trace()
         # loss
         if loss_no_on_diag:
           on_diag = torch.tensor([0.0]).to(device)
@@ -285,7 +286,7 @@ def test_stats(net, data_loader, fSinVals='', save_feats=0, fsave_feats=''):
             on_diag_f_total += on_diag_f.item()
             off_diag_f_total += off_diag_f.item()
 
-            pdb.set_trace()
+            # pdb.set_trace()
 
             if math.isnan(off_diag_f_total):
               print("NaN")
@@ -414,6 +415,11 @@ if __name__ == '__main__':
       else:
         wandb.init(project=args.project, config=args)
 
+    if not os.path.exists('results'):
+        os.mkdir('results')
+    # save_name_pre = '{}{}_{}_{}_{}'.format(corr_neg_one_str, lmbda, feature_dim, batch_size, dataset)
+    save_name_pre = args.wb_name
+
     # data prepare
     DATA_ROOT = '/home/bingbin/datasets/'
     if dataset == 'cifar10':
@@ -453,6 +459,9 @@ if __name__ == '__main__':
     if args.load_ckpt and os.path.exists(args.pretrained_path):
       ckpt_dict = torch.load(args.pretrained_path, map_location='cpu')
       model.load_state_dict(ckpt_dict, strict=False)
+    else:
+      # save the init
+      torch.save(model.state_dict(), 'results/{}_model_init.pth'.format(save_name_pre))
 
     if USE_THOP:
       if dataset == 'cifar10':
@@ -472,11 +481,7 @@ if __name__ == '__main__':
         corr_neg_one_str = 'neg_corr_'
     else:
         corr_neg_one_str = ''
-    # save_name_pre = '{}{}_{}_{}_{}'.format(corr_neg_one_str, lmbda, feature_dim, batch_size, dataset)
-    save_name_pre = args.wb_name
-    
-    if not os.path.exists('results'):
-        os.mkdir('results')
+
     best_acc = 0.0
 
     if args.test_only:
