@@ -8,7 +8,7 @@ test_bt=128
 
 save_token=''
 
-case=1
+case=6
 if [ $case -eq 1 ]; then
   lambda=0.005
   feature_dim=128
@@ -28,6 +28,10 @@ elif [ $case -eq 4 ]; then
   lambda=0.05
   feature_dim=512
   ckpt_path='0.05_512_128_cifar10_model.pth'
+elif [ $case -eq 6 ]; then
+  lambda=0.005
+  feature_dim=128
+  ckpt_path='cifar10_linear_feat128_lmbda0.005_lr1e-4_wd1e-6_bt128_noNormStd_model.pth'
 fi
 ckpt_path='./results/'$ckpt_path
 fig_dir='./figs/dim'$feature_dim'_lmbda'$lambda'_bt'$bt$save_token
