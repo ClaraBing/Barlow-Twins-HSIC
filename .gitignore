@@ -1,0 +1,8 @@
+scripts/
+results/
+results_linear/
+saved_feats/
+wandb/
+__pycache__/
+figs/
+data/
