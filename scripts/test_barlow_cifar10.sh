@@ -28,15 +28,19 @@ elif [ $case -eq 4 ]; then
   lambda=0.05
   feature_dim=512
   ckpt_path='0.05_512_128_cifar10_model.pth'
+elif [ $case -eq 5 ]; then
+  lambda=0.005
+  feature_dim=128
+  ckpt_path='0.005_128_128_cifar10_model.pth'
 fi
 ckpt_path='./results/'$ckpt_path
 fig_dir='./figs/dim'$feature_dim'_lmbda'$lambda'_bt'$bt$save_token
 fSinVals=$fig_dir'/sinVals'
-save_feats=1
+save_feats=0
 fsave_feats='./saved_feats/dim'$feature_dim'_lmbda'$lambda'_bt'$bt$save_token
 
 WANDB_MODE=dryrun \
-CUDA_VISIBLE_DEVICES=1 \
+CUDA_VISIBLE_DEVICES=0 \
   python main.py \
     --test-only=1 \
     --dataset=$dataset \
