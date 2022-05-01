@@ -15,6 +15,7 @@ from tqdm import tqdm
 import math
 import numpy as np
 import h5py
+import pickle
 
 import utils
 from model import Model
@@ -68,12 +69,11 @@ def train(net, data_loader, train_optimizer):
         # cross-correlation matrix
         c = torch.matmul(out_1_norm.T, out_2_norm) / batch_size
 
-        pdb.set_trace()
         # loss
         if loss_no_on_diag:
           on_diag = torch.tensor([0.0]).to(device)
         else:
-          if corr_neg_one_on_diag is False:
+          if not corr_neg_one_on_diag:
             on_diag = torch.diagonal(c).add_(-1).pow_(2).sum()
           else:
             on_diag = torch.diagonal(c).add_(1).pow_(2).sum()
@@ -178,7 +178,7 @@ def test(net, memory_data_loader, test_data_loader, epoch):
             cf = torch.matmul(feat_norm.T, feat_norm) / batch_size
 
             # loss
-            if corr_neg_one_on_diag is False:
+            if not corr_neg_one_on_diag:
               on_diag = torch.diagonal(c).add_(-1).pow_(2).sum()
               on_diag_f = torch.diagonal(cf).add_(-1).pow_(2).sum()
             else:
@@ -419,6 +419,17 @@ if __name__ == '__main__':
         os.mkdir('results')
     # save_name_pre = '{}{}_{}_{}_{}'.format(corr_neg_one_str, lmbda, feature_dim, batch_size, dataset)
     save_name_pre = args.wb_name
+    save_dir = os.path.join('results/', save_name_pre)
+    if os.path.exists(save_dir):
+      print(f"Dir exists: {save_name_pre}.")
+      cont = input("Continue? (y/N)")
+      if cont != 'y' and cont != 'Y':
+        print("Exiting.")
+        exit()
+    os.makedirs(save_dir, exist_ok=1)
+    fargs = os.path.join(save_dir, 'args.pkl')
+    with open(fargs, 'wb') as handle:
+      pickle.dump(args, handle)
 
     # data prepare
     DATA_ROOT = '/home/bingbin/datasets/'
@@ -461,7 +472,7 @@ if __name__ == '__main__':
       model.load_state_dict(ckpt_dict, strict=False)
     else:
       # save the init
-      torch.save(model.state_dict(), 'results/{}_model_init.pth'.format(save_name_pre))
+      torch.save(model.state_dict(), 'results/{}/model_init.pth'.format(save_name_pre))
 
     if USE_THOP:
       if dataset == 'cifar10':
@@ -515,9 +526,9 @@ if __name__ == '__main__':
             results['test_acc@5'].append(test_acc_5)
             # save statistics
             data_frame = pd.DataFrame(data=results, index=range(5, epoch + 1, 5))
-            data_frame.to_csv('results/{}_statistics.csv'.format(save_name_pre), index_label='epoch')
+            data_frame.to_csv('results/{}/statistics.csv'.format(save_name_pre), index_label='epoch')
             if test_acc_1 > best_acc:
                 best_acc = test_acc_1
-                torch.save(model.state_dict(), 'results/{}_model.pth'.format(save_name_pre))
+                torch.save(model.state_dict(), 'results/{}/model.pth'.format(save_name_pre))
         if epoch % 50 == 0:
-            torch.save(model.state_dict(), 'results/{}_model_{}.pth'.format(save_name_pre, epoch))
+            torch.save(model.state_dict(), 'results/{}/model_{}.pth'.format(save_name_pre, epoch))
