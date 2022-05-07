@@ -19,7 +19,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-def plot(net, test_data_loader):
+def plot(net, test_data_loader, use_train_data=0):
+    train_token = '_train' if use_train_data else ''
+
     net.eval()
     count = 0
     total = 0
@@ -34,9 +36,11 @@ def plot(net, test_data_loader):
 
     with torch.no_grad():
         for data_tuple in test_data_loader:
-            (data, _), target = data_tuple
-            data, target = data.cuda(non_blocking=True), target.cuda(non_blocking=True)
+            (data, data2), target = data_tuple
+            data, data2 = data.cuda(non_blocking=True), data2.cuda(non_blocking=True)
+            target = target.cuda(non_blocking=True)
             feature, out = net(data)
+            feature2, out2 = net(data2)
 
             # normalize features
             o_std = out.std(dim=0)
@@ -46,59 +50,140 @@ def plot(net, test_data_loader):
             f_std[f_std==0] = 1
             feat_norm = (feature - feature.mean(dim=0)) / f_std
 
+            o_std2 = out2.std(dim=0)
+            o_std2[o_std2==0] = 1
+            out_norm2 = (out2 - out2.mean(dim=0)) / o_std2
+            f_std2 = feature2.std(dim=0)
+            f_std2[f_std2==0] = 1
+            feat_norm2 = (feature2 - feature2.mean(dim=0)) / f_std2
+
             _, F = feature.shape
             _, P = out.shape
             total += 1
-            if total < 5: # check the first 5 batches
+            if total <= 1: # check the first batch
+
+                # self-correlation
                 sim_matrix_feat = torch.mm(feat_norm, feat_norm.T) / F
                 out_matrix_feat = torch.mm(out_norm, out_norm.T) / P
 
                 dim_matrix_feat = torch.mm(feat_norm.T, feat_norm) / batch_size
                 dim_matrix_out = torch.mm(out_norm.T, out_norm) / batch_size
 
-
+                # Self-correlation
                 plt.clf()
                 ax = sns.heatmap(sim_matrix_feat.cpu().numpy())
                 plt.title(f"Inter Feature similarity (Encoder) {total}")
-                plt.savefig(os.path.join(fig_dir, f"inter_enc_feat_sim{total}.png"), dpi=480)
+                plt.savefig(os.path.join(fig_dir, '0inter', f"inter_enc_feat_sim{total}{train_token}.png"), dpi=480)
 
                 plt.clf()
                 ax = sns.heatmap(out_matrix_feat.cpu().numpy())
                 plt.title(f"Inter projection head feat similarity {total}")
-                plt.savefig(os.path.join(fig_dir, f"inter_ph_out_sim{total}.png"), dpi=480)
+                plt.savefig(os.path.join(fig_dir, '0inter', f"inter_ph_out_sim{total}{train_token}.png"), dpi=480)
 
                 plt.clf()
                 ax = sns.heatmap(dim_matrix_feat.cpu().numpy())
                 plt.title(f"Inter feature dimension similarity (Encoder) {total}")
-                plt.savefig(os.path.join(fig_dir, f"inter_dim_enc_feat_sim{total}.png"), dpi=480)
+                plt.savefig(os.path.join(fig_dir, '0inter', f"inter_dim_enc_feat_sim{total}{train_token}.png"), dpi=480)
 
                 plt.clf()
                 ax = sns.heatmap(dim_matrix_out.cpu().numpy())
                 plt.title(f"Inter feat dimension similarity (Projection head) {total}")
-                plt.savefig(os.path.join(fig_dir, f"inter_dim_ph_out_sim{total}.png"), dpi=480)
+                plt.savefig(os.path.join(fig_dir, '0inter', f"inter_dim_ph_out_sim{total}{train_token}.png"), dpi=480)
+
+                # Plot absolute values of entries
+                plt.clf()
+                ax = sns.heatmap(sim_matrix_feat.abs().cpu().numpy())
+                plt.title(f"Inter Feature similarity (Encoder) {total}")
+                plt.savefig(os.path.join(fig_dir, '0inter', f"inter_enc_feat_sim{total}_abs{train_token}.png"), dpi=480)
+
+                plt.clf()
+                ax = sns.heatmap(out_matrix_feat.abs().cpu().numpy())
+                plt.title(f"Inter projection head feat similarity {total}")
+                plt.savefig(os.path.join(fig_dir, '0inter', f"inter_ph_out_sim{total}_abs{train_token}.png"), dpi=480)
+
+                plt.clf()
+                ax = sns.heatmap(dim_matrix_feat.abs().cpu().numpy())
+                plt.title(f"Inter feature dimension similarity (Encoder) {total}")
+                plt.savefig(os.path.join(fig_dir, '0inter', f"inter_dim_enc_feat_sim{total}_abs{train_token}.png"), dpi=480)
+
+                plt.clf()
+                ax = sns.heatmap(dim_matrix_out.abs().cpu().numpy())
+                plt.title(f"Inter feat dimension similarity (Projection head) {total}")
+                plt.savefig(os.path.join(fig_dir, '0inter', f"inter_dim_ph_out_sim{total}_abs{train_token}.png"), dpi=480)
+
+                if use_train_data:
+                  # Cross correlation
+                  sim_matrix_feat_cross = torch.mm(feat_norm, feat_norm2.T) / F
+                  out_matrix_feat_cross = torch.mm(out_norm, out_norm2.T) / P
+
+                  dim_matrix_feat_cross = torch.mm(feat_norm.T, feat_norm2) / batch_size
+                  dim_matrix_out_cross = torch.mm(out_norm.T, out_norm2) / batch_size
+
+
+                  plt.clf()
+                  ax = sns.heatmap(sim_matrix_feat_cross.cpu().numpy())
+                  plt.title(f"Inter Feature similarity (Encoder) {total}")
+                  plt.savefig(os.path.join(fig_dir, '0inter', f"inter_enc_feat_sim{total}_cross{train_token}.png"), dpi=480)
+
+                  plt.clf()
+                  ax = sns.heatmap(out_matrix_feat_cross.cpu().numpy())
+                  plt.title(f"Inter projection head feat similarity {total}")
+                  plt.savefig(os.path.join(fig_dir, '0inter', f"inter_ph_out_sim{total}_cross{train_token}.png"), dpi=480)
+
+                  plt.clf()
+                  ax = sns.heatmap(dim_matrix_feat_cross.cpu().numpy())
+                  plt.title(f"Inter feature dimension similarity (Encoder) {total}")
+                  plt.savefig(os.path.join(fig_dir, '0inter', f"inter_dim_enc_feat_sim{total}_cross{train_token}.png"), dpi=480)
+
+                  plt.clf()
+                  ax = sns.heatmap(dim_matrix_out_cross.cpu().numpy())
+                  plt.title(f"Inter feat dimension similarity (Projection head) {total}")
+                  plt.savefig(os.path.join(fig_dir, '0inter', f"inter_dim_ph_out_sim{total}_cross{train_token}.png"), dpi=480)
+
+                  # Plot absolute values of entries
+                  plt.clf()
+                  ax = sns.heatmap(sim_matrix_feat_cross.abs().cpu().numpy())
+                  plt.title(f"Inter Feature similarity (Encoder) {total}")
+                  plt.savefig(os.path.join(fig_dir, '0inter', f"inter_enc_feat_sim{total}_cross_abs{train_token}.png"), dpi=480)
+
+                  plt.clf()
+                  ax = sns.heatmap(out_matrix_feat_cross.abs().cpu().numpy())
+                  plt.title(f"Inter projection head feat similarity {total}")
+                  plt.savefig(os.path.join(fig_dir, '0inter', f"inter_ph_out_sim{total}_cross_abs{train_token}.png"), dpi=480)
+
+                  plt.clf()
+                  ax = sns.heatmap(dim_matrix_feat_cross.abs().cpu().numpy())
+                  plt.title(f"Inter feature dimension similarity (Encoder) {total}")
+                  plt.savefig(os.path.join(fig_dir, '0inter', f"inter_dim_enc_feat_sim{total}_cross_abs{train_token}.png"), dpi=480)
+
+                  plt.clf()
+                  ax = sns.heatmap(dim_matrix_out_cross.abs().cpu().numpy())
+                  plt.title(f"Inter feat dimension similarity (Projection head) {total}")
+                  plt.savefig(os.path.join(fig_dir, '0inter', f"inter_dim_ph_out_sim{total}_cross_abs{train_token}.png"), dpi=480)
 
                 for i in range(5): # check the first 5 samples
+                    if 1: break
                     sim_matrix_feat = torch.mm(feature[i].view(F, 1), feature[i].view(1, F))
                     sim_matrix_out = torch.mm(out[i].view(P, 1), out[i].view(1, P))
                     plt.clf()
                     ax = sns.heatmap(sim_matrix_feat.cpu().numpy())
                     plt.title(f"feature correlation {i}")
-                    plt.savefig(os.path.join(fig_dir, f"feat_correlation_{total}_{i}.png"), dpi=480)
+                    plt.savefig(os.path.join(fig_dir, f"feat_correlation_{total}_{i}{train_token}.png"), dpi=480)
 
                     plt.clf()
                     ax = sns.heatmap(sim_matrix_out.cpu().numpy())
                     plt.title(f"output correlation {i}")
-                    plt.savefig(os.path.join(fig_dir, f"out_correlation_{total}_{i}.png"), dpi=480)
+                    plt.savefig(os.path.join(fig_dir, f"out_correlation_{total}_{i}{train_token}.png"), dpi=480)
 
                     plt.clf()
                     plt.hist(sim_matrix_feat.cpu().flatten().cpu().numpy(), 10)
                     plt.title(f"feature correlation distribution {i}")
-                    plt.savefig(os.path.join(fig_dir, f"feat_correlation_hist_{total}_{i}.png"), dpi=480)
+                    plt.savefig(os.path.join(fig_dir, f"feat_correlation_hist_{total}_{i}{train_token}.png"), dpi=480)
 
                     plt.clf()
                     plt.hist(sim_matrix_out.cpu().flatten().cpu().numpy(), 10)
                     plt.title(f"output correlation distribution {i}")
-                    plt.savefig(os.path.join(fig_dir, f"out_correlation_hist_{total}_{i}.png"), dpi=480)
+                    plt.savefig(os.path.join(fig_dir, f"out_correlation_hist_{total}_{i}{train_token}.png"), dpi=480)
                     count += 1
             
             mean_feat_val += feature.mean()
@@ -137,6 +222,7 @@ if __name__ == '__main__':
     parser.set_defaults(corr_neg_one=False)
 
     parser.add_argument('--fig-dir', type=str, default='', help="Dir path in which the plots are saved.")
+    parser.add_argument('--use-train-data', type=int, default=0, help="Whether to use the training data and transformation.")
 
     # args parse
     args = parser.parse_args()
@@ -147,6 +233,7 @@ if __name__ == '__main__':
     
     fig_dir = args.fig_dir
     os.makedirs(fig_dir, exist_ok=1)
+    os.makedirs(os.path.join(fig_dir, '0inter'), exist_ok=1)
      
     lmbda = args.lmbda
     corr_neg_one = args.corr_neg_one
@@ -182,6 +269,14 @@ if __name__ == '__main__':
   
     # model setup and optimizer config
     model = Model(feature_dim, proj_head_type, dataset).cuda()
-    model.load_state_dict(torch.load(args.ckpt_path), strict=False)
+    if args.ckpt_path and not os.path.isdir(args.ckpt_path) and os.path.exists(args.ckpt_path):
+      model.load_state_dict(torch.load(args.ckpt_path), strict=False)
+    else:
+      print("Path doesn't exist:", args.ckpt_path)
+      print("Not loading.\n")
 
-    plot(model, test_data_loader=test_loader)
+    if args.use_train_data:
+      plot(model, test_data_loader=train_loader, use_train_data=1)
+    else:
+      plot(model, test_data_loader=test_loader, use_train_data=0)
+
