@@ -29,6 +29,7 @@ except Exception as e:
 def train(net, data_loader, train_optimizer):
     net.train()
     total_loss, total_num, train_bar = 0.0, 0, tqdm(data_loader)
+    bt_cnt = 0
     for data_tuple in train_bar:
         (pos_1, pos_2), _ = data_tuple
         pos_1, pos_2 = pos_1.cuda(non_blocking=True), pos_2.cuda(non_blocking=True)
@@ -53,7 +54,7 @@ def train(net, data_loader, train_optimizer):
     return total_loss / total_num
 
 # test for one epoch, use weighted knn to find the most similar images' label to assign the test image
-def test(net, memory_data_loader, test_data_loader):
+def test(net, memory_data_loader, test_data_loader, epoch):
     net.eval()
     total_top1, total_top5, total_num, feature_bank, target_bank = 0.0, 0.0, 0, [], []
     with torch.no_grad():
@@ -298,11 +299,12 @@ if __name__=='__main__':
     # training loop
     results = {'train_loss': [], 'test_acc@1': [], 'test_acc@5': []}
     best_acc = 0.0
+    test_acc_1, test_acc_5 = test(model, memory_loader, test_loader, epoch=-1)
     for epoch in range(1, epochs + 1):
         train_loss = train(model, train_loader, optimizer)
         if epoch % 5 == 0:
             results['train_loss'].append(train_loss)
-            test_acc_1, test_acc_5 = test(model, memory_loader, test_loader)
+            test_acc_1, test_acc_5 = test(model, memory_loader, test_loader, epoch=epoch)
             results['test_acc@1'].append(test_acc_1)
             results['test_acc@5'].append(test_acc_5)
             # save statistics
