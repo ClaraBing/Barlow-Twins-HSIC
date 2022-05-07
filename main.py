@@ -70,27 +70,31 @@ def train(net, data_loader, train_optimizer):
         c = torch.matmul(out_1_norm.T, out_2_norm) / batch_size
 
         # loss
-        if loss_no_on_diag:
-          on_diag = torch.tensor([0.0]).to(device)
-        else:
-          if not corr_neg_one_on_diag:
-            on_diag = torch.diagonal(c).add_(-1).pow_(2).sum()
+        if symloss:
+          if loss_no_on_diag:
+            on_diag = torch.tensor([0.0]).to(device)
           else:
-            on_diag = torch.diagonal(c).add_(1).pow_(2).sum()
+            if not corr_neg_one_on_diag:
+              on_diag = torch.diagonal(c).add_(-1).pow_(2).sum()
+            else:
+              on_diag = torch.diagonal(c).add_(1).pow_(2).sum()
 
-        if loss_no_off_diag:
-          off_diag = torch.tensor([0.0]).to(device)
-        else:
-          if corr_neg_one is False:
-              # the loss described in the original Barlow Twin's paper
-              # encouraging off_diag to be zero
-              off_diag = off_diagonal(c).pow_(2).sum()
+          if loss_no_off_diag:
+            off_diag = torch.tensor([0.0]).to(device)
           else:
-              # inspired by HSIC
-              # encouraging off_diag to be negative ones
-              off_diag = off_diagonal(c).add_(1).pow_(2).sum()
-        loss = on_diag + lmbda * off_diag
-        
+            if corr_neg_one is False:
+                # the loss described in the original Barlow Twin's paper
+                # encouraging off_diag to be zero
+                off_diag = off_diagonal(c).pow_(2).sum()
+            else:
+                # inspired by HSIC
+                # encouraging off_diag to be negative ones
+                off_diag = off_diagonal(c).add_(1).pow_(2).sum()
+          loss = on_diag + lmbda * off_diag
+        else:
+          on_diag = torch.tensor([0.0]).to(device)
+          off_diag = torch.tensor([0.0]).to(device)
+          loss = torch.norm(c - torch.eye(c.size(dim=0)).to(device), p=1)
 
         train_optimizer.zero_grad()
         loss.backward()
@@ -194,6 +198,8 @@ def test(net, memory_data_loader, test_data_loader, epoch):
                 # encouraging off_diag to be negative ones
                 off_diag = off_diagonal(c).add_(1).pow_(2).sum()
                 off_diag_f = off_diagonal(cf).add_(1).pow_(2).sum()
+            if not symloss:
+              loss = torch.norm(c - torch.eye(c.size(dim=0)).to(device), p=1)
 
             on_diag_total += on_diag.item()
             off_diag_total += off_diag.item()
@@ -212,18 +218,21 @@ def test(net, memory_data_loader, test_data_loader, epoch):
     off_diag_f_total /= bt_cnt
 
     if USE_WANDB:
-      wandb.log({
-        'test_on_diag': on_diag_total, 
-        'test_off_diag': off_diag_total,
-        'test_on_diag_feat': on_diag_f_total, 
-        'test_off_diag_feat': off_diag_f_total,
-        'test_on_diag_avg': on_diag_total / args.feature_dim, 
-        'test_off_diag_avg': off_diag_total / (args.feature_dim * (args.feature_dim-1)),
-        'test_on_diag_feat_avg': on_diag_f_total / args.feature_dim, 
-        'test_off_diag_feat_avg': off_diag_f_total / (args.feature_dim * (args.feature_dim-1)),
-        'total_top1': total_top1,
-        'total_top5': total_top5,
-      })
+      log_dict = {
+          'test_on_diag': on_diag_total, 
+          'test_off_diag': off_diag_total,
+          'test_on_diag_feat': on_diag_f_total, 
+          'test_off_diag_feat': off_diag_f_total,
+          'test_on_diag_avg': on_diag_total / args.feature_dim, 
+          'test_off_diag_avg': off_diag_total / (args.feature_dim * (args.feature_dim-1)),
+          'test_on_diag_feat_avg': on_diag_f_total / args.feature_dim, 
+          'test_off_diag_feat_avg': off_diag_f_total / (args.feature_dim * (args.feature_dim-1)),
+          'total_top1': total_top1,
+          'total_top5': total_top5,
+        }
+      if not symloss:
+        log_dict['asymloss'] = loss.item()
+      wandb.log(log_dict)
  
     return total_top1 * 100, total_top5 * 100
 
@@ -309,7 +318,9 @@ def test_stats(net, data_loader, fSinVals='', save_feats=0, fsave_feats=''):
     print('test_on_diag_feat_avg:', on_diag_f_total / args.feature_dim)
     print('test_off_diag_feat_avg:', off_diag_f_total / (args.feature_dim * (args.feature_dim-1)))
 
-    # plot the singular values
+    """
+    plot the singular values
+    """
     ss_total /= bt_cnt
     ssf_total /= bt_cnt
     # original values
@@ -334,6 +345,11 @@ def test_stats(net, data_loader, fSinVals='', save_feats=0, fsave_feats=''):
     ax2.set_ylabel(f'features (dim{feat_dim})')
     plt.savefig(fSinVals.replace('.png', '_log.png'))
     plt.clf()
+
+    # calculate the stable rank
+    stable_rank = ss_total.max() / ss_total.sum()
+    stable_rank_f = ssf_total.max() / ssf_total.sum()
+    print(f"Stable rank: out:{stable_rank.item()} / feat:{stable_rank_f.item()}")
 
     if save_feats:
       print(f"Saving features to {fsave_feats}")
@@ -366,7 +382,8 @@ if __name__ == '__main__':
     # on diag entries: 1 or -1
     parser.add_argument('--corr_neg_one_on_diag', type=int, default=0, choices=[0,1],
                         help="Whether to force the on-diag entries to be -1.")
-
+    parser.add_argument('--symloss', type=int, default=1, choices=[0,1],
+                        help="Whether use feature-instance symmetric loss or not.") # if false, then use 1norm of Crosscovar - I, which is not symmetric
     # optimization
     parser.add_argument('--lr', default=1e-3, type=float)
     parser.add_argument('--wd', default=1e-6, type=float)
@@ -405,6 +422,7 @@ if __name__ == '__main__':
     batch_size, epochs = args.batch_size, args.epochs
     lr, wd = args.lr, args.wd
     loss_no_on_diag, loss_no_off_diag = args.loss_no_on_diag, args.loss_no_off_diag
+    symloss = args.symloss
     
     lmbda = args.lmbda
     corr_neg_one, corr_neg_one_on_diag = args.corr_neg_one, args.corr_neg_one_on_diag
@@ -415,21 +433,23 @@ if __name__ == '__main__':
       else:
         wandb.init(project=args.project, config=args)
 
+    # Save path
     if not os.path.exists('results'):
         os.mkdir('results')
     # save_name_pre = '{}{}_{}_{}_{}'.format(corr_neg_one_str, lmbda, feature_dim, batch_size, dataset)
     save_name_pre = args.wb_name
     save_dir = os.path.join('results/', save_name_pre)
-    if os.path.exists(save_dir):
-      print(f"Dir exists: {save_name_pre}.")
-      cont = input("Continue? (y/N)")
-      if cont != 'y' and cont != 'Y':
-        print("Exiting.")
-        exit()
-    os.makedirs(save_dir, exist_ok=1)
-    fargs = os.path.join(save_dir, 'args.pkl')
-    with open(fargs, 'wb') as handle:
-      pickle.dump(args, handle)
+    if not args.test_only:
+      if os.path.exists(save_dir):
+        print(f"Dir exists: {save_name_pre}.")
+        cont = input("Continue? (y/N)")
+        if cont != 'y' and cont != 'Y':
+          print("Exiting.")
+          exit()
+      os.makedirs(save_dir, exist_ok=1)
+      fargs = os.path.join(save_dir, 'args.pkl')
+      with open(fargs, 'wb') as handle:
+        pickle.dump(args, handle)
 
     # data prepare
     DATA_ROOT = '/home/bingbin/datasets/'
@@ -459,7 +479,9 @@ if __name__ == '__main__':
                                                       utils.TinyImageNetPairTransform(train_transform = False))
         test_data = torchvision.datasets.ImageFolder('data/tiny-imagenet-200/val', \
                                                       utils.TinyImageNetPairTransform(train_transform = False))
-    
+    else:
+        raise ValueError(f" Unknown dataset {dataset}")
+   
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True,
                             drop_last=True)
     memory_loader = DataLoader(memory_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
@@ -468,9 +490,10 @@ if __name__ == '__main__':
     # model setup and optimizer config
     model = Model(feature_dim, proj_head_type, dataset).cuda()
     if args.load_ckpt and os.path.exists(args.pretrained_path):
+      print("Loading ckpt from", args.pretrained_path)
       ckpt_dict = torch.load(args.pretrained_path, map_location='cpu')
       model.load_state_dict(ckpt_dict, strict=False)
-    else:
+    elif not args.test_only:
       # save the init
       torch.save(model.state_dict(), 'results/{}/model_init.pth'.format(save_name_pre))
 
