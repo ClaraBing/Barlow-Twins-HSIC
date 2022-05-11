@@ -10,6 +10,8 @@ matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 # from seaborn import heatmap
 
+import pdb
+
 
 if torch.cuda.is_available():
     device = 'cuda:0'
@@ -17,7 +19,9 @@ else:
     device='cpu'
 print(f"Using device {device}")
 
+VERBOSE = 0
 FIG_DIR='figs/align/'
+
 
 def train_gd(max_num_epochs, X, Y, optimizer_type, lr, momentum, log_interval=10):
     print(f"\n optimizer_type=={optimizer_type}, lr=={lr}, momentum=={momentum}\n")
@@ -56,11 +60,13 @@ def train_gd(max_num_epochs, X, Y, optimizer_type, lr, momentum, log_interval=10
 def plot_results(A_optimal, b_optimal, fname='align_sVals.png'):
     # Inspect the optimal A and b
     u, s, vh = np.linalg.svd(A_optimal, full_matrices=True)
-    print('Singular values', s)
+    if VERBOSE:
+      print('Singular values', s)
+    print('Stable rank (l2/lF):', s.max() / s.sum())
     
     plt.figure()
     plt.plot(range(len(s)), s)
-    plt.savefig()
+    plt.savefig(fname)
     plt.clf()
 
     plt.figure()
@@ -112,10 +118,14 @@ def check_alignment(features_file1, features_file2, layer_key, fname=''):
             b_optimal = result['b_optimal']
             best_hyperparam = hyperparam 
 
+    pdb.set_trace()
+    unaligned_loss = np.linalg.norm(features1 - features2)
+    print('Unaligned loss', unaligned_loss)
     print('min_loss', min_loss)
     print('best_hyperparam: (optimizer_type, lr, momentum) = ', best_hyperparam)
-    print('A_optimal', A_optimal)
-    print('b_optimal', b_optimal)
+    if VERBOSE:
+      print('A_optimal', A_optimal)
+      print('b_optimal', b_optimal)
 
     if fname:
       plot_results(A_optimal, b_optimal, fname)
