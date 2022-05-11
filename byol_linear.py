@@ -4,17 +4,14 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-try:
-  from thop import profile, clever_format
-  USE_THOP = True
-except:
-  print("Not using thop.")
-  USE_THOP = False
+# from thop import profile, clever_format
 from torch.utils.data import DataLoader
 from torchvision.datasets import CIFAR10
+from torchvision import models
 from tqdm import tqdm
-
+from byol import BYOL
 import utils
+from utils import str2bool
 
 import torchvision
 
@@ -30,18 +27,16 @@ except Exception as e:
 
 
 class Net(nn.Module):
-    def __init__(self, num_class, pretrained_path, dataset):
+    def __init__(self, encoder, num_class):
         super(Net, self).__init__()
 
         # encoder
-        from model import Model
-        self.f = Model(dataset=dataset).f
+        self.f = encoder
         # classifier
         self.fc = nn.Linear(2048, num_class, bias=True)
-        self.load_state_dict(torch.load(pretrained_path, map_location='cpu'), strict=False)
 
     def forward(self, x):
-        x = self.f(x)
+        x = self.f(x, return_projection = False)
         feature = torch.flatten(x, start_dim=1)
         out = self.fc(feature)
         return out
@@ -56,6 +51,7 @@ def train_val(net, data_loader, train_optimizer):
         bt_cnt = 0
         for data, target in data_bar:
             data, target = data.cuda(non_blocking=True), target.cuda(non_blocking=True)
+
             out = net(data)
             loss = loss_criterion(out, target)
 
@@ -76,19 +72,18 @@ def train_val(net, data_loader, train_optimizer):
                                              model_path.split('/')[-1]))
 
             bt_cnt += 1
-            if USE_WANDB and bt_cnt % 20 == 0:
-              if is_train:
-                wandb.log({
-                  'loss':loss.item(),
-                  'linear_total_correct_1': total_correct_1 / total_num * 100,
-                  'linear_total_correct_5': total_correct_5 / total_num * 100,
-                  })
-              else:
-                wandb.log({
-                  'val_loss':loss.item(),
-                  'val_linear_total_correct_1': total_correct_1 / total_num * 100,
-                  'val_linear_total_correct_5': total_correct_5 / total_num * 100,
-                  })
+            if is_train:
+              wandb.log({
+                'loss':loss.item(),
+                'linear_total_correct_1': total_correct_1 / total_num * 100,
+                'linear_total_correct_5': total_correct_5 / total_num * 100,
+                })
+            else:
+              wandb.log({
+                'val_loss':loss.item(),
+                'val_linear_total_correct_1': total_correct_1 / total_num * 100,
+                'val_linear_total_correct_5': total_correct_5 / total_num * 100,
+                })
     return total_loss / total_num, total_correct_1 / total_num * 100, total_correct_5 / total_num * 100
 
 
@@ -99,6 +94,12 @@ if __name__ == '__main__':
                         help='The base string of the pretrained model path')
     parser.add_argument('--batch_size', type=int, default=512, help='Number of images in each mini-batch')
     parser.add_argument('--epochs', type=int, default=200, help='Number of sweeps over the dataset to train')
+    parser.add_argument('--image_size', default=32, type=int, help='Size of image')
+    parser.add_argument('--feature_dim', default=128, type=int, help='Feature dim for latent vector')
+    parser.add_argument('--proj-head-type', default='2layer', choices=['none', 'linear', '2layer'],
+                        help="Type of the projector.")
+    parser.add_argument('--proj_hidden_dim', default=512, type=int, help='Feature dim for latent vector')
+    parser.add_argument('--use_default_enc', type=str2bool, default=True, help="use default resnet 50 encoder")
 
     # optimization
     parser.add_argument('--lr', default=1e-3, type=float)
@@ -138,26 +139,55 @@ if __name__ == '__main__':
         test_data = torchvision.datasets.ImageFolder('data/tiny-imagenet-200/val', \
                             utils.TinyImageNetPairTransform(train_transform = False, pair_transform=False))
 
-    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True)
-    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
+    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
+    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
 
-    model = Net(num_class=len(train_data.classes), pretrained_path=model_path, dataset=dataset).cuda()
+    if args.use_default_enc:
+        encoder = models.resnet50()
+        hidden_layer = 'avgpool'
+    else:
+        enc_layers = []
+        for name, module in models.resnet50(pretrained=args.use_pretrained_enc).named_children():
+            if name == 'conv1':
+                module = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+            if dataset == 'cifar10':
+                #if not isinstance(module, nn.Linear) and not isinstance(module, nn.MaxPool2d):
+                if not isinstance(module, nn.MaxPool2d) and not isinstance(module, nn.Linear):
+                    enc_layers.append(module)
+                else:
+                    print("skipping MaxPool2d... or Linear")
+            elif dataset == 'tiny_imagenet' or dataset == 'stl10':
+                if not isinstance(module, nn.Linear):
+                    enc_layers.append(module)
+        # encoder
+        encoder = nn.Sequential(*enc_layers)
+        hidden_layer = -1
+
+    byol = BYOL(net=encoder, 
+                    image_size=args.image_size, 
+                    hidden_layer=hidden_layer, 
+                    projection_size=args.feature_dim, 
+                    proj_head_type=args.proj_head_type,
+                    projection_hidden_size=args.proj_hidden_dim,
+                    use_momentum=True).cuda()
+    byol.load_state_dict(torch.load(args.model_path), strict=False)
+
+    model = Net(num_class=len(train_data.classes), encoder=byol.online_encoder).cuda()
     for param in model.f.parameters():
         param.requires_grad = False
 
-    if USE_THOP:
-      if dataset == 'cifar10':
-          flops, params = profile(model, inputs=(torch.randn(1, 3, 32, 32).cuda(),))
-      elif dataset == 'tiny_imagenet' or dataset == 'stl10':
-          flops, params = profile(model, inputs=(torch.randn(1, 3, 64, 64).cuda(),))
-      flops, params = clever_format([flops, params])
-      print('# Model Params: {} FLOPs: {}'.format(params, flops))
-    optimizer = optim.Adam(model.fc.parameters(), lr=lr, weight_decay=wd)
+    # if dataset == 'cifar10':
+    #     flops, params = profile(model, inputs=(torch.randn(1, 3, 32, 32).cuda(),))
+    # elif dataset == 'tiny_imagenet' or dataset == 'stl10':
+    #     flops, params = profile(model, inputs=(torch.randn(1, 3, 64, 64).cuda(),))
+    # flops, params = clever_format([flops, params])
+    # print('# Model Params: {} FLOPs: {}'.format(params, flops))
+    optimizer = optim.Adam(model.fc.parameters(), lr=1e-3, weight_decay=1e-6)
     loss_criterion = nn.CrossEntropyLoss()
     results = {'train_loss': [], 'train_acc@1': [], 'train_acc@5': [],
                'test_loss': [], 'test_acc@1': [], 'test_acc@5': []}
 
-    save_name = args.wb_name + '_linear.csv'
+    save_name = model_path.split('.pth')[0] + '_linear.csv'
 
     best_acc = 0.0
     for epoch in range(1, epochs + 1):
@@ -171,7 +201,7 @@ if __name__ == '__main__':
         results['test_acc@5'].append(test_acc_5)
         # save statistics
         data_frame = pd.DataFrame(data=results, index=range(1, epoch + 1))
-        data_frame.to_csv(os.path.join('results_linear/', save_name), index_label='epoch')
+        data_frame.to_csv(save_name, index_label='epoch')
         #if test_acc_1 > best_acc:
         #    best_acc = test_acc_1
         #    torch.save(model.state_dict(), 'results/linear_model.pth')
@@ -184,4 +214,5 @@ if __name__ == '__main__':
             'linear_test_top1': test_acc_1,
             'linear_test_top5': test_acc_5,
             })
+
 
