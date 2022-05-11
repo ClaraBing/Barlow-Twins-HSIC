@@ -1,12 +1,14 @@
-
+import os
 import pandas as pd
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import h5py
+import matplotlib
+matplotlib.use('Agg')
 from matplotlib import pyplot as plt
-from seaborn import heatmap
+# from seaborn import heatmap
 
 
 if torch.cuda.is_available():
@@ -15,6 +17,7 @@ else:
     device='cpu'
 print(f"Using device {device}")
 
+FIG_DIR='figs/align/'
 
 def train_gd(max_num_epochs, X, Y, optimizer_type, lr, momentum, log_interval=10):
     print(f"\n optimizer_type=={optimizer_type}, lr=={lr}, momentum=={momentum}\n")
@@ -50,23 +53,25 @@ def train_gd(max_num_epochs, X, Y, optimizer_type, lr, momentum, log_interval=10
 
 
 
-def plot_results(A_optimal, b_optimal):
+def plot_results(A_optimal, b_optimal, fname='align_sVals.png'):
     # Inspect the optimal A and b
     u, s, vh = np.linalg.svd(A_optimal, full_matrices=True)
     print('Singular values', s)
     
     plt.figure()
     plt.plot(range(len(s)), s)
-    plt.show()
+    plt.savefig()
+    plt.clf()
 
     plt.figure()
     plt.plot(range(len(s[:20])), s[:20])
-    plt.show()
+    plt.savefig(fname.replace('.png', '_top20.png'))
+    plt.clf()
 
     print('b_norm', np.linalg.norm(b_optimal))
 
 
-def check_alignment(features_file1, features_file2, layer_key):
+def check_alignment(features_file1, features_file2, layer_key, fname=''):
     assert layer_key in ['outs', 'feats']  # 'outs' is 128-dim, 'feats' means 2048-dim
 
     with h5py.File(features_file1, "r") as f:
@@ -112,8 +117,20 @@ def check_alignment(features_file1, features_file2, layer_key):
     print('A_optimal', A_optimal)
     print('b_optimal', b_optimal)
 
-    plot_results(A_optimal, b_optimal)
+    if fname:
+      plot_results(A_optimal, b_optimal, fname)
 
+
+if 1:
+  # # lambda = 0.05 diff init
+  f1 = 'saved_feats/dim128_lmbda0.05_bt128_test.h5' 
+  f2 = 'saved_feats/dim128_lmbda0.05_bt128_diffInit_test.h5' 
+  
+  fname = os.path.join(FIG_DIR, 'bt_lmdba0.05_diffInits.png')
+  # ## 128-dim
+  check_alignment(f1, f2, 'outs', fname=fname)
+  # ## 2048-dim
+  check_alignment(f1, f2, 'feats', fname=fname)
 
 if 0:
   # # lambda = 0.005 same init different runs
@@ -134,18 +151,18 @@ if 0:
 if 0:
   # # lambda = 0.005 diff init
   # ## 128-dim
-   check_alignment(
+  check_alignment(
           'output/dim128_lmbda0.005_bt128_sameInit_test.h5', 
           'output/dim128_lmbda0.005_bt128_test.h5', 
           'outs',
-      )
- 
+  )
+    
   # ## 2048-dim
   check_alignment(
           'output/dim128_lmbda0.005_bt128_sameInit_test.h5', 
           'output/dim128_lmbda0.005_bt128_test.h5', 
           'feats',
-      )
+  )
   
 
 if 0:
