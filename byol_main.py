@@ -312,6 +312,6 @@ if __name__=='__main__':
             data_frame.to_csv('results/{}_statistics.csv'.format(save_name_pre), index_label='epoch')
             if test_acc_1 > best_acc:
                 best_acc = test_acc_1
-                torch.save(model.state_dict(), 'results/{}_model.pth'.format(save_name_pre))
+                torch.save(model.state_dict(), 'results/{}/model.pth'.format(save_name_pre))
         if epoch % 50 == 0:
-            torch.save(model.state_dict(), 'results/{}_model_{}.pth'.format(save_name_pre, epoch))
+            torch.save(model.state_dict(), 'results/{}/model_{}.pth'.format(save_name_pre, epoch))
