@@ -60,14 +60,23 @@ def train(net, data_loader, train_optimizer):
         # Barlow Twins
         
         # normalize the representations along the batch dimension
-        out_1_norm = out_1 - out_1.mean(dim=0) 
-        out_2_norm = out_2 - out_2.mean(dim=0)
+        if args.norm_mean:
+          out_1_norm = out_1 - out_1.mean(dim=0) 
+          out_2_norm = out_2 - out_2.mean(dim=0)
+        else:
+          out_1_norm, out_2_norm = out_1, out_2
         if args.norm_std:
           out_1_norm /= out_1.std(dim=0)
           out_2_norm /= out_2.std(dim=0)
+        else:
+          out_1_norm *= (feature_dim)**0.5
+          out_2_norm *= (feature_dim)**0.5
         
         # cross-correlation matrix
         c = torch.matmul(out_1_norm.T, out_2_norm) / batch_size
+
+        if SET_TRACE:
+          pdb.set_trace()
 
         # loss
         if symloss:
@@ -142,6 +151,7 @@ def test(net, memory_data_loader, test_data_loader, epoch):
         test_bar = tqdm(test_data_loader)
         on_diag_total, off_diag_total = 0, 0
         on_diag_f_total, off_diag_f_total = 0, 0
+        stable_rank_out_total, stable_rank_feat_total = 0, 0
         bt_cnt = 0
         for data_tuple in test_bar:
             (data, _), target = data_tuple
@@ -172,14 +182,23 @@ def test(net, memory_data_loader, test_data_loader, epoch):
             bt_cnt += 1
 
             # normalize the representations along the batch dimension
-            out_norm = (out - out.mean(dim=0))
-            feat_norm = (feature - feature.mean(dim=0))
+            if args.norm_mean:
+              out_norm = (out - out.mean(dim=0))
+              feat_norm = (feature - feature.mean(dim=0))
+            else:
+              out_norm, feat_norm = out, feature
             if args.norm_std:
               out_norm /= out.std(dim=0)
               feat_norm /= feature.std(dim=0)
             # cross-correlation matrix
             c = torch.matmul(out_norm.T, out_norm) / batch_size
             cf = torch.matmul(feat_norm.T, feat_norm) / batch_size
+            
+            # check for stable rank
+            _, ss, _ = torch.svd(c)
+            _, ssf, _ = torch.svd(cf)
+            stable_rank_out_total += (ss.sum() / ss[0]).item()
+            stable_rank_feat_total += (ssf.sum() / ssf[0]).item()
 
             # loss
             if not corr_neg_one_on_diag:
@@ -211,6 +230,8 @@ def test(net, memory_data_loader, test_data_loader, epoch):
 
     total_top1 = total_top1 / total_num
     total_top5 = total_top5 / total_num
+    stable_rank_out_total /= bt_cnt
+    stable_rank_feat_total /= bt_cnt
 
     on_diag_total /= bt_cnt
     off_diag_total /= bt_cnt
@@ -229,6 +250,8 @@ def test(net, memory_data_loader, test_data_loader, epoch):
           'test_off_diag_feat_avg': off_diag_f_total / (args.feature_dim * (args.feature_dim-1)),
           'total_top1': total_top1,
           'total_top5': total_top5,
+          'stable_rank_out': stable_rank_out_total,
+          'stable_rank_feat': stable_rank_feat_total,
         }
       if not symloss:
         log_dict['asymloss'] = loss.item()
@@ -253,8 +276,11 @@ def test_stats(net, data_loader, fSinVals='', save_feats=0, fsave_feats=''):
             feature, out = net(data)
 
             # normalize the representations along the batch dimension
-            out_norm = out - out.mean(dim=0)
-            feat_norm = feature - feature.mean(dim=0)
+            if args.norm_mean:
+              out_norm = (out - out.mean(dim=0))
+              feat_norm = (feature - feature.mean(dim=0))
+            else:
+              out_norm, feat_norm = out, feature
             if args.norm_std:
               f_std = feature.std(dim=0)
               f_std[f_std==0] = 1
@@ -391,6 +417,8 @@ if __name__ == '__main__':
                         help="Whether to drop the loss term for on-diag entries.")
     parser.add_argument('--loss-no-off-diag', default=0, type=int, choices=[0,1],
                         help="Whether to drop the loss term for off-diag entries.")
+    parser.add_argument('--norm-mean', default=1, type=int, choices=[0,1],
+                        help="Whether to normalize per dim to have mean 0.")
     parser.add_argument('--norm-std', default=1, type=int, choices=[0,1],
                         help="Whether to normalize per dim std=1.")
 
@@ -441,7 +469,7 @@ if __name__ == '__main__':
     save_dir = os.path.join('results/', save_name_pre)
     if not args.test_only:
       if os.path.exists(save_dir):
-        print(f"Dir exists: {save_name_pre}.")
+        print(f"Dir exists: {save_name_pre}")
         cont = input("Continue? (y/N)")
         if cont != 'y' and cont != 'Y':
           print("Exiting.")
@@ -539,6 +567,7 @@ if __name__ == '__main__':
       test_stats(model, memory_loader, fSinVals=fSinVals_train, save_feats=save_feats, fsave_feats=fsave_feats_train)
       exit()
 
+    SET_TRACE = 0
     test_acc_1, test_acc_5 = test(model, memory_loader, test_loader, epoch=-1)
     for epoch in range(1, epochs + 1):
         train_loss = train(model, train_loader, optimizer)
@@ -553,5 +582,7 @@ if __name__ == '__main__':
             if test_acc_1 > best_acc:
                 best_acc = test_acc_1
                 torch.save(model.state_dict(), 'results/{}/model.pth'.format(save_name_pre))
+            if epoch == 5 and 0:
+              SET_TRACE = 1
         if epoch % 50 == 0:
             torch.save(model.state_dict(), 'results/{}/model_{}.pth'.format(save_name_pre, epoch))
