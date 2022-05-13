@@ -108,3 +108,35 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
+def check_stable_ranks(ffeats):
+  with h5py.File(ffeats, "r") as f:
+      outs = np.array(f['outs'])
+      feats = np.array(f['feats'])
+
+  _, ss_outs, _ = np.linalg.svd(outs)
+  stable_rank_outs = ss_outs.sum() / ss_outs.max()
+  _, ss_feats, _ = np.linalg.svd(feats)
+  stable_rank_feats = ss_feats.sum() / ss_feats.max()
+  print('Stable ranks for', ffeats)
+  print('lF/l2:\t outs: {:.3f} / feats: {:.3f}'.format(stable_rank_outs, stable_rank_feats))
+  print('(lF/l2)^2:\t outs: {:.3f} / feats: {:.3f}'.format(stable_rank_outs**2, stable_rank_feats**2))
+  
+
+if __name__ == '__main__':
+  import os
+  import h5py
+  import numpy as np
+  from glob import glob
+
+  if 1:
+    # check the stable ranks for all features
+    ffeats_list = glob('saved_feats/*')
+    print(f"{len(ffeats_list)} features to check.")
+    for ffeats in ffeats_list:
+      if '0.005' not in ffeats:
+        continue
+      check_stable_ranks(ffeats)
+      print()
+
