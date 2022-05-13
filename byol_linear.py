@@ -1,5 +1,6 @@
 import argparse
 
+import os
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -16,6 +17,8 @@ from utils import str2bool
 import torchvision
 
 import pdb
+
+EARLY_STOP_EPS = 0.1
 
 try:
   import wandb
@@ -170,7 +173,9 @@ if __name__ == '__main__':
                     proj_head_type=args.proj_head_type,
                     projection_hidden_size=args.proj_hidden_dim,
                     use_momentum=True).cuda()
-    byol.load_state_dict(torch.load(args.model_path), strict=False)
+    if args.model_path and not os.path.isdir(args.model_path) and os.path.exists(args.model_path):
+      # byol.load_state_dict(torch.load(args.model_path), strict=False)
+      byol.load_state_dict(torch.load(args.model_path), strict=True)
 
     model = Net(num_class=len(train_data.classes), encoder=byol.online_encoder).cuda()
     for param in model.f.parameters():
@@ -190,15 +195,19 @@ if __name__ == '__main__':
     save_name = model_path.split('.pth')[0] + '_linear.csv'
 
     best_acc = 0.0
+    early_stop_cnt = 0
+    test_acc_history = 0
     for epoch in range(1, epochs + 1):
         train_loss, train_acc_1, train_acc_5 = train_val(model, train_loader, optimizer)
         results['train_loss'].append(train_loss)
         results['train_acc@1'].append(train_acc_1)
         results['train_acc@5'].append(train_acc_5)
+
         test_loss, test_acc_1, test_acc_5 = train_val(model, test_loader, None)
         results['test_loss'].append(test_loss)
         results['test_acc@1'].append(test_acc_1)
         results['test_acc@5'].append(test_acc_5)
+
         # save statistics
         data_frame = pd.DataFrame(data=results, index=range(1, epoch + 1))
         data_frame.to_csv(save_name, index_label='epoch')
@@ -214,5 +223,16 @@ if __name__ == '__main__':
             'linear_test_top1': test_acc_1,
             'linear_test_top5': test_acc_5,
             })
+
+        # check for early stop
+        test_acc_history = (1-1/epoch) * test_acc_history + (1/epoch) * test_acc_1
+        if epoch > 20 and test_acc_1 < test_acc_history + EARLY_STOP_EPS:
+          early_stop_cnt += 1
+        else:
+          early_stop_cnt = 0
+        if early_stop_cnt == 10:
+          print("Early stopping. Bye!")
+          exit()
+
 
 
