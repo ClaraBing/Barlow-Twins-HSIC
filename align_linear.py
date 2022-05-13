@@ -20,21 +20,26 @@ else:
 print(f"Using device {device}")
 
 VERBOSE = 0
+VERBOSE_TRAIN = 0
 FIG_DIR='figs/align/'
 
 
 def train_gd(max_num_epochs, X, Y, optimizer_type, lr, momentum, log_interval=10):
-    print(f"\n optimizer_type=={optimizer_type}, lr=={lr}, momentum=={momentum}\n")
+    if VERBOSE_TRAIN:
+      print(f"\n optimizer_type=={optimizer_type}, lr=={lr}, momentum=={momentum}\n")
 
     assert X.shape == Y.shape
     n, d = X.shape
     X = torch.tensor(X, device=device, requires_grad=False)
     Y = torch.tensor(Y, device=device, requires_grad=False)
     
-    A = torch.randn((d, d), device=device, dtype=torch.float, requires_grad=True)
+    A = torch.randn((d, d), device=device, dtype=torch.float) / d**0.5
+    A.requires_grad = True
     b = torch.randn((d, ), device=device, dtype=torch.float, requires_grad=True)
     A_optimal = A.detach().cpu().numpy()
     b_optimal = b.detach().cpu().numpy()
+
+    # pdb.set_trace()
 
     loss_history = []
     if momentum is None:
@@ -44,7 +49,7 @@ def train_gd(max_num_epochs, X, Y, optimizer_type, lr, momentum, log_interval=10
     for epoch in range(max_num_epochs):
         optimizer.zero_grad()
         loss = torch.norm(X @ A + b - Y)
-        if epoch % log_interval == 0:
+        if epoch % log_interval == 0 and VERBOSE_TRAIN:
             print(f"Epoch {epoch}, loss {loss}")
         if len(loss_history) >= 1 and loss < min(loss_history):
             A_optimal = A.detach().cpu().numpy()
@@ -53,6 +58,7 @@ def train_gd(max_num_epochs, X, Y, optimizer_type, lr, momentum, log_interval=10
         loss.backward()
         optimizer.step()
     
+    # pdb.set_trace()
     return loss_history, A_optimal, b_optimal
 
 
@@ -118,11 +124,10 @@ def check_alignment(features_file1, features_file2, layer_key, fname=''):
             b_optimal = result['b_optimal']
             best_hyperparam = hyperparam 
 
-    pdb.set_trace()
     unaligned_loss = np.linalg.norm(features1 - features2)
-    print('Unaligned loss', unaligned_loss)
-    print('min_loss', min_loss)
     print('best_hyperparam: (optimizer_type, lr, momentum) = ', best_hyperparam)
+    print('Unaligned loss:\t', unaligned_loss)
+    print('min_loss:\t', min_loss)
     if VERBOSE:
       print('A_optimal', A_optimal)
       print('b_optimal', b_optimal)
@@ -130,16 +135,65 @@ def check_alignment(features_file1, features_file2, layer_key, fname=''):
     if fname:
       plot_results(A_optimal, b_optimal, fname)
 
-
-if 1:
-  # # lambda = 0.05 diff init
-  f1 = 'saved_feats/dim128_lmbda0.05_bt128_test.h5' 
-  f2 = 'saved_feats/dim128_lmbda0.05_bt128_diffInit_test.h5' 
+def May11():
+  if 0:
+    # # lambda = 0.05 diff init
+    f1 = 'saved_feats/dim128_lmbda0.05_bt128_test.h5' 
+    f2 = 'saved_feats/dim128_lmbda0.05_bt128_diffInit_test.h5' 
+    fname = os.path.join(FIG_DIR, 'bt_lmdba0.05_diffInits.png')
   
-  fname = os.path.join(FIG_DIR, 'bt_lmdba0.05_diffInits.png')
+  if 1:
+    # BYOL (1st run) vs BYOL (2nd run)
+    f1 = 'saved_feats/byol_dim128_lmbda0.005_bt128_test_Ashwini.h5'
+    f2 = 'saved_feats/byol_dim128_lmbda0.005_bt128_test.h5'
+    # NOTE: this run is saved with the wrong name (with '_diffInits')
+    fname = os.path.join(FIG_DIR, 'byol1_vs_byol2.png')
+
+  if 0:
+    # BYOL (1st run) vs BT=0.05 (1st run)
+    f1 = 'saved_feats/byol_dim128_lmbda0.005_bt128_test_Ashwini.h5'
+    f2 = 'saved_feats/dim128_lmbda0.05_bt128_test.h5' 
+    # NOTE: this run is saved with the wrong name (with '_diffInits')
+    fname = os.path.join(FIG_DIR, 'byol1_vs_BTlmdba0.05.png')
+
+  if 0:
+    # BYOL (1st run) vs BT=0.05 (2nd run)
+    f1 = 'saved_feats/byol_dim128_lmbda0.005_bt128_test_Ashwini.h5'
+    f2 = 'saved_feats/dim128_lmbda0.05_bt128_diffInit_test.h5' 
+    fname = os.path.join(FIG_DIR, 'byol1_vs_BTlmdba0.05_diffInits.png')
+
+  if 0:
+    # BYOL (2nd run) vs BT=0.05 (1st run)
+    f1 = 'saved_feats/byol_dim128_lmbda0.005_bt128_test.h5'
+    f2 = 'saved_feats/dim128_lmbda0.05_bt128_test.h5' 
+    fname = os.path.join(FIG_DIR, 'byol2_vs_BTlmdba0.05.png')
+
+  if 0:
+    # BYOL (2nd run) vs BT=0.05 (2nd run)
+    f1 = 'saved_feats/byol_dim128_lmbda0.005_bt128_test.h5'
+    f2 = 'saved_feats/dim128_lmbda0.05_bt128_diffInit_test.h5' 
+    fname = os.path.join(FIG_DIR, 'byol2_vs_BTlmdba0.05_diffInits.png')
+
+  if 0:
+    # BYOL (1st run) vs BT=0.005 (1st run)
+    f1 = 'saved_feats/byol_dim128_lmbda0.005_bt128_test_Ashwini.h5'
+    f2 = 'saved_feats/dim128_lmbda0.005_bt128_sameInit_test.h5' 
+    fname = os.path.join(FIG_DIR, 'byol1_vs_BTlmdba0.005.png')
+
+  if 0:
+    # BYOL (2nd run) vs BT=0.005 (1st run)
+    f1 = 'saved_feats/byol_dim128_lmbda0.005_bt128_test.h5'
+    f2 = 'saved_feats/dim128_lmbda0.005_bt128_sameInit_test.h5' 
+    fname = os.path.join(FIG_DIR, 'byol2_vs_BTlmdba0.005.png')
+
+  print(fname.replace('.png', ''))
+
   # ## 128-dim
+  print("Outs (dim 128)")
   check_alignment(f1, f2, 'outs', fname=fname)
+
   # ## 2048-dim
+  print("\nFeats (dim 2048)")
   check_alignment(f1, f2, 'feats', fname=fname)
 
 if 0:
@@ -280,4 +334,7 @@ if 0:
   np.cov(feats1, rowvar=False)
   np.cov(X2048, rowvar=False)
   np.cov(byol_feats1, rowvar=False)
+
+if __name__ == '__main__':
+  May11()
 
