@@ -66,8 +66,12 @@ def train(net, data_loader, train_optimizer):
         else:
           out_1_norm, out_2_norm = out_1, out_2
         if args.norm_std:
-          out_1_norm /= out_1.std(dim=0)
-          out_2_norm /= out_2.std(dim=0)
+          o_std1 = out_1.std(dim=0)
+          o_std1[o_std1==0] = 1
+          out_1_norm /= o_std1
+          o_std2 = out_2.std(dim=0)
+          o_std2[o_std2==0] = 1
+          out_2_norm /= o_std2
         else:
           out_1_norm *= (feature_dim)**0.5
           out_2_norm *= (feature_dim)**0.5
@@ -190,8 +194,13 @@ def test(net, memory_data_loader, test_data_loader, epoch):
             else:
               out_norm, feat_norm = out, feature
             if args.norm_std:
-              out_norm /= out.std(dim=0)
-              feat_norm /= feature.std(dim=0)
+              o_std = out.std(dim=0)
+              o_std[o_std==0] = 1
+              out_norm /= o_std
+
+              f_std = feature.std(dim=0)
+              f_std[f_std==0] = 1
+              feat_norm /= f_std
             # cross-correlation matrix
             c = torch.matmul(out_norm.T, out_norm) / batch_size
             cf = torch.matmul(feat_norm.T, feat_norm) / batch_size
