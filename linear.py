@@ -37,12 +37,12 @@ else:
 
 
 class Net(nn.Module):
-    def __init__(self, num_class, pretrained_path, dataset, fname_linear_cls=''):
+    def __init__(self, num_class, pretrained_path, dataset, fname_linear_cls='', norm_l2=1):
         super(Net, self).__init__()
 
         # encoder
         from model import Model
-        self.f = Model(dataset=dataset).f
+        self.f = Model(dataset=dataset, norm_l2=norm_l2).f
         # classifier
         if fname_linear_cls != '':
           linear_state_dict = torch.load(fname_linear_cls, map_location='cpu')
@@ -127,6 +127,9 @@ if __name__ == '__main__':
     # optimization
     parser.add_argument('--lr', default=1e-3, type=float)
     parser.add_argument('--wd', default=1e-6, type=float)
+    parser.add_argument('--norm-l2', default=1, type=int, choices=[0,1],
+                        help="Whether to normalize the features to have l2 norm 1.")
+
 
     # logging
     parser.add_argument('--project', default='nonContrastive')
@@ -167,7 +170,7 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True)
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
 
-    model = Net(num_class=len(train_data.classes), pretrained_path=model_path, dataset=dataset, fname_linear_cls=args.fname_linear_cls).to(device)
+    model = Net(num_class=len(train_data.classes), pretrained_path=model_path, dataset=dataset, fname_linear_cls=args.fname_linear_cls, norm_l2=args.norm_l2).to(device)
     for param in model.f.parameters():
         param.requires_grad = False
 

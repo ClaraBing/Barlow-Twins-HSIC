@@ -14,12 +14,12 @@ import utils
 import torchvision
 
 class Net(nn.Module):
-    def __init__(self, num_class, pretrained_path, dataset):
+    def __init__(self, num_class, pretrained_path, dataset, norm_l2=norm_l2):
         super(Net, self).__init__()
 
         # encoder
         from model import Model
-        self.f = Model(dataset=dataset).f
+        self.f = Model(dataset=dataset, norm_l2=norm_l2).f
         # classifier
         self.fc = nn.Linear(2048, num_class, bias=True)
         self.load_state_dict(torch.load(pretrained_path, map_location='cpu'), strict=False)
@@ -68,6 +68,8 @@ if __name__ == '__main__':
                         help='The base string of the pretrained model path')
     parser.add_argument('--batch_size', type=int, default=512, help='Number of images in each mini-batch')
     parser.add_argument('--epochs', type=int, default=200, help='Number of sweeps over the dataset to train')
+    parser.add_argument('--norm-l2', default=1, type=int, choices=[0,1],
+                        help="Whether to normalize the features to have l2 norm 1.")
 
     args = parser.parse_args()
     model_path, batch_size, epochs = args.model_path, args.batch_size, args.epochs
@@ -91,7 +93,7 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True)
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
 
-    model = Net(num_class=len(train_data.classes), pretrained_path=model_path, dataset=dataset).cuda()
+    model = Net(num_class=len(train_data.classes), pretrained_path=model_path, dataset=dataset, norm_l2=args.norm_l2).cuda()
     for param in model.f.parameters():
         param.requires_grad = False
 

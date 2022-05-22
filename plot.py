@@ -215,6 +215,9 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', default=1000, type=int, help='Number of sweeps over the dataset to train')
     parser.add_argument('--proj-head-type', default='2layer', choices=['none', 'linear', '2layer'])
     parser.add_argument('--ckpt_path', type=str, required=True, help='path to checkpoint')
+    parser.add_argument('--norm-l2', default=1, type=int, choices=[0,1],
+                        help="Whether to normalize the features to have l2 norm 1.")
+
     # for barlow twins
     parser.add_argument('--lmbda', default=0.005, type=float, help='Lambda that controls the on- and off-diagonal terms')
     parser.add_argument('--corr_neg_one', dest='corr_neg_one', action='store_true')
@@ -268,7 +271,7 @@ if __name__ == '__main__':
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
   
     # model setup and optimizer config
-    model = Model(feature_dim, proj_head_type, dataset).cuda()
+    model = Model(feature_dim, proj_head_type, dataset, norm_l2=args.norm_l2).cuda()
     if args.ckpt_path and not os.path.isdir(args.ckpt_path) and os.path.exists(args.ckpt_path):
       model.load_state_dict(torch.load(args.ckpt_path), strict=False)
     else:

@@ -5,8 +5,11 @@ from torchvision.models.resnet import resnet50
 
 
 class Model(nn.Module):
-    def __init__(self, feature_dim=128, proj_head_type='2layer', dataset='cifar10'):
+    def __init__(self, feature_dim=128, proj_head_type='2layer', dataset='cifar10', norm_l2=1):
         super(Model, self).__init__()
+
+        # whether to normalize the output features to have norm 1
+        self.norm_l2 = norm_l2
 
         self.f = []
         for name, module in resnet50().named_children():
@@ -37,4 +40,6 @@ class Model(nn.Module):
         x = self.f(x)
         feature = torch.flatten(x, start_dim=1)
         out = self.g(feature)
-        return F.normalize(feature, dim=-1), F.normalize(out, dim=-1)
+        if self.norm_l2:
+          return F.normalize(feature, dim=-1), F.normalize(out, dim=-1)
+        return feature, out
