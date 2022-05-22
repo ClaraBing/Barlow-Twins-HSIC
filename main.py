@@ -457,9 +457,9 @@ if __name__ == '__main__':
     
     if USE_WANDB:
       if args.wb_name != 'default':
-        wandb.init(project=args.project, name=args.wb_name, config=args)
+        wandb.init(project=args.project, name=args.wb_name, config=args, entity='ssl-mld')
       else:
-        wandb.init(project=args.project, config=args)
+        wandb.init(project=args.project, config=args, entity='ssl-mld')
 
     # Save path
     if not os.path.exists('results'):

@@ -111,7 +111,6 @@ def train_val(net, data_loader, train_optimizer):
                   'val_linear_total_correct_1': total_correct_1 / total_num * 100,
                   'val_linear_total_correct_5': total_correct_5 / total_num * 100,
                   })
-              pdb.set_trace()
               torch.save(net.state_dict(), save_name_model)
     return total_loss / total_num, total_correct_1 / total_num * 100, total_correct_5 / total_num * 100
 
@@ -144,9 +143,9 @@ if __name__ == '__main__':
 
     if USE_WANDB:
       if args.wb_name != 'default':
-        wandb.init(project=args.project, name=args.wb_name, config=args)
+        wandb.init(project=args.project, name=args.wb_name, config=args, entity='ssl-mld')
       else:
-        wandb.init(project=args.project, config=args)
+        wandb.init(project=args.project, config=args, entity='ssl-mld')
 
     dataset = args.dataset
     if dataset == 'cifar10':
