@@ -153,6 +153,8 @@ def test(net, memory_data_loader, test_data_loader, epoch):
         on_diag_f_total, off_diag_f_total = 0, 0
         stable_rank_out_total, stable_rank_feat_total = 0, 0
         bt_cnt = 0
+        bt_cnt_stableRank_out = 0
+        bt_cnt_stableRank_feat = 0
         for data_tuple in test_bar:
             (data, _), target = data_tuple
             data, target = data.cuda(non_blocking=True), target.cuda(non_blocking=True)
@@ -195,10 +197,18 @@ def test(net, memory_data_loader, test_data_loader, epoch):
             cf = torch.matmul(feat_norm.T, feat_norm) / batch_size
             
             # check for stable rank
-            _, ss, _ = torch.svd(c)
-            _, ssf, _ = torch.svd(cf)
-            stable_rank_out_total += (ss.sum() / ss[0]).item()
-            stable_rank_feat_total += (ssf.sum() / ssf[0]).item()
+            try:
+              _, ss, _ = torch.svd(c)
+              stable_rank_out_total += (ss.sum() / ss[0]).item()
+              bt_cnt_stableRank_out += 1
+            except:
+              print("Fail to calculate stable rank for out.")
+            try:
+              _, ssf, _ = torch.svd(cf)
+              stable_rank_feat_total += (ssf.sum() / ssf[0]).item()
+              bt_cnt_stableRank_feat += 1
+            except:
+              print("Fail to calculate stable rank for feat.")
 
             # loss
             if not corr_neg_one_on_diag:
@@ -230,8 +240,8 @@ def test(net, memory_data_loader, test_data_loader, epoch):
 
     total_top1 = total_top1 / total_num
     total_top5 = total_top5 / total_num
-    stable_rank_out_total /= bt_cnt
-    stable_rank_feat_total /= bt_cnt
+    stable_rank_out_total /= bt_cnt_stableRank_out
+    stable_rank_feat_total /= bt_cnt_stableRank_feat
 
     on_diag_total /= bt_cnt
     off_diag_total /= bt_cnt
@@ -418,9 +428,11 @@ if __name__ == '__main__':
     parser.add_argument('--loss-no-off-diag', default=0, type=int, choices=[0,1],
                         help="Whether to drop the loss term for off-diag entries.")
     parser.add_argument('--norm-mean', default=1, type=int, choices=[0,1],
-                        help="Whether to normalize per dim to have mean 0.")
+                        help="Whether to standardize per dim to have mean 0.")
     parser.add_argument('--norm-std', default=1, type=int, choices=[0,1],
-                        help="Whether to normalize per dim std=1.")
+                        help="Whether to standardize per dim std=1.")
+    parser.add_argument('--norm-l2', default=1, type=int, choices=[0,1],
+                        help="Whether to normalize the features to have l2 norm 1.")
 
     # logging
     parser.add_argument('--project', default='nonContrastive')
@@ -516,7 +528,7 @@ if __name__ == '__main__':
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=16, pin_memory=True)
 
     # model setup and optimizer config
-    model = Model(feature_dim, proj_head_type, dataset).cuda()
+    model = Model(feature_dim, proj_head_type, dataset, norm_l2=args.norm_l2).cuda()
     if args.load_ckpt and os.path.exists(args.pretrained_path):
       print("Loading ckpt from", args.pretrained_path)
       ckpt_dict = torch.load(args.pretrained_path, map_location='cpu')
