@@ -66,12 +66,12 @@ def train(net, data_loader, train_optimizer):
         else:
           out_1_norm, out_2_norm = out_1, out_2
         if args.norm_std:
+          # NOTE: not checking o_std1[o_std1==0] = 1,
+          # since this is an inplace operation and will cause trouble for autograd.
           o_std1 = out_1.std(dim=0)
-          o_std1[o_std1==0] = 1
-          out_1_norm /= o_std1
+          out_1_norm = out_1_norm / o_std1
           o_std2 = out_2.std(dim=0)
-          o_std2[o_std2==0] = 1
-          out_2_norm /= o_std2
+          out_2_norm = out_2_norm / o_std2
         else:
           out_1_norm *= (feature_dim)**0.5
           out_2_norm *= (feature_dim)**0.5
