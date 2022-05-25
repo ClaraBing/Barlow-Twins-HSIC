@@ -57,57 +57,50 @@ def train(net, data_loader, train_optimizer):
         pos_1, pos_2 = pos_1.cuda(non_blocking=True), pos_2.cuda(non_blocking=True)
         feature_1, out_1 = net(pos_1)
         feature_2, out_2 = net(pos_2)
-        # Barlow Twins
         
-        # normalize the representations along the batch dimension
+        # shift the representations to have mean 0
         if args.norm_mean:
           out_1_norm = out_1 - out_1.mean(dim=0) 
           out_2_norm = out_2 - out_2.mean(dim=0)
         else:
           out_1_norm, out_2_norm = out_1, out_2
-        if args.norm_std:
-          # NOTE: not checking o_std1[o_std1==0] = 1,
-          # since this is an inplace operation and will cause trouble for autograd.
-          o_std1 = out_1.std(dim=0)
-          out_1_norm = out_1_norm / o_std1
-          o_std2 = out_2.std(dim=0)
-          out_2_norm = out_2_norm / o_std2
+
+        loss = 0
+        if args.loss_var:
+          # variance term
+          v1 = torch.sqrt(out_1.var(dim=0) + args.eps)
+          v2 = torch.sqrt(out_2.var(dim=0) + args.eps)
+          # hinge loss
+          if args.gamma > 0:
+            v1 = torch.relu(args.gamma - v1)
+            v2 = torch.relu(args.gamma - v2)
+          else:
+            v1 = -1 * v1
+            v2 = -1 * v2
+          v1, v2 = v1.mean(), v2.mean()
+          loss += mu * (v1 + v2)
         else:
-          out_1_norm *= (feature_dim)**0.5
-          out_2_norm *= (feature_dim)**0.5
-        
-        # cross-correlation matrix
-        c = torch.matmul(out_1_norm.T, out_2_norm) / batch_size
+          v1, v2 = torch.zeros([]), torch.zeros([])
+
+        if args.loss_cov:
+          # covariance term
+          cv1 = torch.matmul(out_1_norm.T, out_1_norm) / (batch_size - 1)
+          cv2 = torch.matmul(out_2_norm.T, out_2_norm) / (batch_size - 1)
+          off_diag1 = off_diagonal(cv1).pow_(2).sum() / feature_dim
+          off_diag2 = off_diagonal(cv2).pow_(2).sum() / feature_dim
+          loss += nu * (off_diag1 + off_diag2)
+        else:
+          off_diag1, off_diag2 = torch.zeros([]), torch.zeros([])
+
+        if args.loss_sim:
+          # simlarity term
+          sim = ((out_1 - out_2)**2).sum() / batch_size
+          loss += lmbda * sim
+        else:
+          sim = torch.zeros([])
 
         if SET_TRACE:
           pdb.set_trace()
-
-        # loss
-        if symloss:
-          if loss_no_on_diag:
-            on_diag = torch.tensor([0.0]).to(device)
-          else:
-            if not corr_neg_one_on_diag:
-              on_diag = torch.diagonal(c).add_(-1).pow_(2).sum()
-            else:
-              on_diag = torch.diagonal(c).add_(1).pow_(2).sum()
-
-          if loss_no_off_diag:
-            off_diag = torch.tensor([0.0]).to(device)
-          else:
-            if corr_neg_one is False:
-                # the loss described in the original Barlow Twin's paper
-                # encouraging off_diag to be zero
-                off_diag = off_diagonal(c).pow_(2).sum()
-            else:
-                # inspired by HSIC
-                # encouraging off_diag to be negative ones
-                off_diag = off_diagonal(c).add_(1).pow_(2).sum()
-          loss = on_diag + lmbda * off_diag
-        else:
-          on_diag = torch.tensor([0.0]).to(device)
-          off_diag = torch.tensor([0.0]).to(device)
-          loss = torch.norm(c - torch.eye(c.size(dim=0)).to(device), p=1)
 
         train_optimizer.zero_grad()
         loss.backward()
@@ -115,23 +108,19 @@ def train(net, data_loader, train_optimizer):
 
         total_num += batch_size
         total_loss += loss.item() * batch_size
-        if corr_neg_one is True:
-            off_corr = -1
-        else:
-            off_corr = 0
-
         bt_cnt += 1
         if USE_WANDB and bt_cnt % 20 == 0:
           wandb.log({
             'loss':loss.item(),
-            'on_diag': on_diag.item(),
-            'off_diag': off_diag.item(),
-            'on_diag_avg': on_diag.item() / args.feature_dim,
-            'off_diag_avg': off_diag.item() / (args.feature_dim * (args.feature_dim-1)),
+            'var1': v1.item(),
+            'var2': v2.item(),
+            'cov1': off_diag1.item(),
+            'cov2': off_diag2.item(),
+            'sim': sim.item(),
             })
 
-        train_bar.set_description('Train Epoch: [{}/{}] Loss: {:.4f} off_corr:{} lmbda:{:.4f} bsz:{} f_dim:{} dataset: {}'.format(\
-                                epoch, epochs, total_loss / total_num, off_corr, lmbda, batch_size, feature_dim, dataset))
+        train_bar.set_description('Train Epoch: [{}/{}] Loss: {:.4f}, var:{:.4f}, cov:{:.4f}, sim:{:.4f}, lmbda:{}, mu:{}, nu:{}, bsz:{} f_dim:{} dataset: {}'.format(\
+                                epoch, epochs, total_loss / total_num, v1.item(), off_diag1.item(), sim.item(), lmbda, mu, nu, batch_size, feature_dim, dataset))
 
     return total_loss / total_num
 
@@ -153,8 +142,6 @@ def test(net, memory_data_loader, test_data_loader, epoch):
         feature_labels = torch.cat(target_bank, dim=0).contiguous().to(feature_bank.device)
         # loop test data to predict the label by weighted knn search
         test_bar = tqdm(test_data_loader)
-        on_diag_total, off_diag_total = 0, 0
-        on_diag_f_total, off_diag_f_total = 0, 0
         stable_rank_out_total, stable_rank_feat_total = 0, 0
         bt_cnt = 0
         bt_cnt_stableRank_out = 0
@@ -193,14 +180,7 @@ def test(net, memory_data_loader, test_data_loader, epoch):
               feat_norm = (feature - feature.mean(dim=0))
             else:
               out_norm, feat_norm = out, feature
-            if args.norm_std:
-              o_std = out.std(dim=0)
-              o_std[o_std==0] = 1
-              out_norm /= o_std
 
-              f_std = feature.std(dim=0)
-              f_std[f_std==0] = 1
-              feat_norm /= f_std
             # cross-correlation matrix
             c = torch.matmul(out_norm.T, out_norm) / batch_size
             cf = torch.matmul(feat_norm.T, feat_norm) / batch_size
@@ -219,31 +199,6 @@ def test(net, memory_data_loader, test_data_loader, epoch):
             except:
               print("Fail to calculate stable rank for feat.")
 
-            # loss
-            if not corr_neg_one_on_diag:
-              on_diag = torch.diagonal(c).add_(-1).pow_(2).sum()
-              on_diag_f = torch.diagonal(cf).add_(-1).pow_(2).sum()
-            else:
-              on_diag = torch.diagonal(c).add_(1).pow_(2).sum()
-              on_diag_f = torch.diagonal(cf).add_(1).pow_(2).sum()
-            if corr_neg_one is False:
-                # the loss described in the original Barlow Twin's paper
-                # encouraging off_diag to be zero
-                off_diag = off_diagonal(c).pow_(2).sum()
-                off_diag_f = off_diagonal(cf).pow_(2).sum()
-            else:
-                # inspired by HSIC
-                # encouraging off_diag to be negative ones
-                off_diag = off_diagonal(c).add_(1).pow_(2).sum()
-                off_diag_f = off_diagonal(cf).add_(1).pow_(2).sum()
-            if not symloss:
-              loss = torch.norm(c - torch.eye(c.size(dim=0)).to(device), p=1)
-
-            on_diag_total += on_diag.item()
-            off_diag_total += off_diag.item()
-            on_diag_f_total += on_diag_f.item()
-            off_diag_f_total += off_diag_f.item()
-    
             test_bar.set_description('Test Epoch: [{}/{}] Acc@1:{:.2f}% Acc@5:{:.2f}%'
                                      .format(epoch, epochs, total_top1 / total_num * 100, total_top5 / total_num * 100))
 
@@ -252,28 +207,13 @@ def test(net, memory_data_loader, test_data_loader, epoch):
     stable_rank_out_total /= bt_cnt_stableRank_out
     stable_rank_feat_total /= bt_cnt_stableRank_feat
 
-    on_diag_total /= bt_cnt
-    off_diag_total /= bt_cnt
-    on_diag_f_total /= bt_cnt
-    off_diag_f_total /= bt_cnt
-
     if USE_WANDB:
       log_dict = {
-          'test_on_diag': on_diag_total, 
-          'test_off_diag': off_diag_total,
-          'test_on_diag_feat': on_diag_f_total, 
-          'test_off_diag_feat': off_diag_f_total,
-          'test_on_diag_avg': on_diag_total / args.feature_dim, 
-          'test_off_diag_avg': off_diag_total / (args.feature_dim * (args.feature_dim-1)),
-          'test_on_diag_feat_avg': on_diag_f_total / args.feature_dim, 
-          'test_off_diag_feat_avg': off_diag_f_total / (args.feature_dim * (args.feature_dim-1)),
           'total_top1': total_top1,
           'total_top5': total_top5,
           'stable_rank_out': stable_rank_out_total,
           'stable_rank_feat': stable_rank_feat_total,
         }
-      if not symloss:
-        log_dict['asymloss'] = loss.item()
       wandb.log(log_dict)
  
     return total_top1 * 100, total_top5 * 100
@@ -300,13 +240,7 @@ def test_stats(net, data_loader, fSinVals='', save_feats=0, fsave_feats=''):
               feat_norm = (feature - feature.mean(dim=0))
             else:
               out_norm, feat_norm = out, feature
-            if args.norm_std:
-              f_std = feature.std(dim=0)
-              f_std[f_std==0] = 1
-              o_std = out.std(dim=0)
-              o_std[o_std==0] = 1
-              out_norm /= o_std
-              feat_norm /= f_std
+
             # cross-correlation matrix
             c = torch.matmul(out_norm.T, out_norm) / batch_size
             cf = torch.matmul(feat_norm.T, feat_norm) / batch_size
@@ -324,16 +258,10 @@ def test_stats(net, data_loader, fSinVals='', save_feats=0, fsave_feats=''):
             # loss
             on_diag = torch.diagonal(c).pow_(2).sum()
             on_diag_f = torch.diagonal(cf).pow_(2).sum()
-            if corr_neg_one is False:
-                # the loss described in the original Barlow Twin's paper
-                # encouraging off_diag to be zero
-                off_diag = off_diagonal(c).pow_(2).sum()
-                off_diag_f = off_diagonal(cf).pow_(2).sum()
-            else:
-                # inspired by HSIC
-                # encouraging off_diag to be negative ones
-                off_diag = off_diagonal(c).add_(1).pow_(2).sum()
-                off_diag_f = off_diagonal(cf).add_(1).pow_(2).sum()
+            # the loss described in the original Barlow Twin's paper
+            # encouraging off_diag to be zero
+            off_diag = off_diagonal(c).pow_(2).sum()
+            off_diag_f = off_diagonal(cf).pow_(2).sum()
 
             on_diag_total += on_diag.item()
             off_diag_total += off_diag.item()
@@ -351,10 +279,6 @@ def test_stats(net, data_loader, fSinVals='', save_feats=0, fsave_feats=''):
     on_diag_f_total /= bt_cnt
     off_diag_f_total /= bt_cnt
 
-    # print('test_on_diag:', on_diag_total)
-    # print('test_off_diag:', off_diag_total)
-    # print('test_on_diag_feat:', on_diag_f_total)
-    # print('test_off_diag_feat:', off_diag_f_total)
     on_diag_avg = (on_diag_total / args.feature_dim)**0.5
     on_diag_avg = on_diag_avg**0.5
     print(f'feature_dim: {feature_dim} / lambda {lmbda}')
@@ -417,29 +341,25 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default=128, type=int, help='Number of images in each mini-batch')
     parser.add_argument('--epochs', default=1000, type=int, help='Number of sweeps over the dataset to train')
     parser.add_argument('--proj-head-type', default='2layer', choices=['none', 'linear', '2layer'])
-    # for barlow twins
-    
-    parser.add_argument('--lmbda', default=0.005, type=float, help='Lambda that controls the on- and off-diagonal terms')
-    # off diag entries: 0 or -1
-    parser.add_argument('--corr_neg_one', dest='corr_neg_one', action='store_true')
-    parser.add_argument('--corr_zero', dest='corr_neg_one', action='store_false')
-    parser.set_defaults(corr_neg_one=False)
-    # on diag entries: 1 or -1
-    parser.add_argument('--corr_neg_one_on_diag', type=int, default=0, choices=[0,1],
-                        help="Whether to force the on-diag entries to be -1.")
-    parser.add_argument('--symloss', type=int, default=1, choices=[0,1],
-                        help="Whether use feature-instance symmetric loss or not.") # if false, then use 1norm of Crosscovar - I, which is not symmetric
+
+    # for VICReg loss
+    parser.add_argument('--lmbda', default=1, type=float, help='weight for the similarity term in the loss.')
+    parser.add_argument('--mu', default=1, type=float, help='weight for the variance term in the loss.')
+    parser.add_argument('--nu', default=0.05, type=float, help='weight for the covariance term in the loss.')
+    parser.add_argument('--gamma', default=1, type=float, help='threshold for the hinge loss.')
+    parser.add_argument('--eps', default=1e-4, type=float, help='threshold for the hinge loss.')
+    parser.add_argument('--loss-var', type=int, default=0, choices=[0,1],
+                        help="Whether to use the variance term in the loss.")
+    parser.add_argument('--loss-cov', type=int, default=0, choices=[0,1],
+                        help="Whether to use the covariance term in the loss.")
+    parser.add_argument('--loss-sim', type=int, default=0, choices=[0,1],
+                        help="Whether to use the similarity term in the loss.")
+
     # optimization
     parser.add_argument('--lr', default=1e-3, type=float)
     parser.add_argument('--wd', default=1e-6, type=float)
-    parser.add_argument('--loss-no-on-diag', default=0, type=int, choices=[0,1],
-                        help="Whether to drop the loss term for on-diag entries.")
-    parser.add_argument('--loss-no-off-diag', default=0, type=int, choices=[0,1],
-                        help="Whether to drop the loss term for off-diag entries.")
     parser.add_argument('--norm-mean', default=1, type=int, choices=[0,1],
                         help="Whether to standardize per dim to have mean 0.")
-    parser.add_argument('--norm-std', default=1, type=int, choices=[0,1],
-                        help="Whether to standardize per dim std=1.")
     parser.add_argument('--norm-l2', default=1, type=int, choices=[0,1],
                         help="Whether to normalize the features to have l2 norm 1.")
 
@@ -470,11 +390,8 @@ if __name__ == '__main__':
     proj_head_type = args.proj_head_type
     batch_size, epochs = args.batch_size, args.epochs
     lr, wd = args.lr, args.wd
-    loss_no_on_diag, loss_no_off_diag = args.loss_no_on_diag, args.loss_no_off_diag
-    symloss = args.symloss
     
-    lmbda = args.lmbda
-    corr_neg_one, corr_neg_one_on_diag = args.corr_neg_one, args.corr_neg_one_on_diag
+    lmbda, mu, nu = args.lmbda, args.mu, args.nu
     
     if USE_WANDB:
       if args.wb_name != 'default':
@@ -485,7 +402,6 @@ if __name__ == '__main__':
     # Save path
     if not os.path.exists('results'):
         os.mkdir('results')
-    # save_name_pre = '{}{}_{}_{}_{}'.format(corr_neg_one_str, lmbda, feature_dim, batch_size, dataset)
     save_name_pre = args.wb_name
     save_dir = os.path.join('results/', save_name_pre)
     if not args.test_only:
@@ -560,11 +476,6 @@ if __name__ == '__main__':
 
     # training loop
     results = {'train_loss': [], 'test_acc@1': [], 'test_acc@5': []}
-    if corr_neg_one is True:
-        corr_neg_one_str = 'neg_corr_'
-    else:
-        corr_neg_one_str = ''
-
     best_acc = 0.0
 
     if args.test_only:
