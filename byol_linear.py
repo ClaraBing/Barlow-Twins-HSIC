@@ -99,7 +99,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=200, help='Number of sweeps over the dataset to train')
     parser.add_argument('--image_size', default=32, type=int, help='Size of image')
     parser.add_argument('--feature_dim', default=128, type=int, help='Feature dim for latent vector')
-    parser.add_argument('--proj-head-type', default='2layer', choices=['none', 'linear', '2layer'],
+    parser.add_argument('--proj-head-type', default='2layer', choices=['none', 'linear', '2layer', 'linear_noBNReLU'],
                         help="Type of the projector.")
     parser.add_argument('--proj_hidden_dim', default=512, type=int, help='Feature dim for latent vector')
     parser.add_argument('--use_default_enc', type=str2bool, default=True, help="use default resnet 50 encoder")
@@ -174,8 +174,12 @@ if __name__ == '__main__':
                     projection_hidden_size=args.proj_hidden_dim,
                     use_momentum=True).cuda()
     if args.model_path and not os.path.isdir(args.model_path) and os.path.exists(args.model_path):
-      # byol.load_state_dict(torch.load(args.model_path), strict=False)
-      byol.load_state_dict(torch.load(args.model_path), strict=True)
+      loaded_dict = torch.load(args.model_path)
+      keys_to_ignore = [key for key in loaded_dict if 'online_predictor' in key]
+      for key in keys_to_ignore:
+        loaded_dict.pop(key)
+      byol.load_state_dict(loaded_dict, strict=False)
+        # byol.load_state_dict(loaded_dict, strict=True)
 
     model = Net(num_class=len(train_data.classes), encoder=byol.online_encoder).cuda()
     for param in model.f.parameters():

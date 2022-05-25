@@ -89,6 +89,8 @@ def MLP(dim, projection_size, hidden_size=4096, proj_head_type='2layer'):
       projector = nn.Sequential(nn.BatchNorm1d(dim),
                              nn.ReLU(inplace=True),
                              nn.Linear(dim, projection_size, bias=True))
+    elif proj_head_type == 'linear_noBNReLU':
+      projector = nn.Sequential(nn.Linear(dim, projection_size, bias=True))
     elif proj_head_type == 'none':
       projector = lambda x:x
     return projector
