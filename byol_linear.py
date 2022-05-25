@@ -28,18 +28,39 @@ except Exception as e:
   print('Not using wandb. \n\n')
   USE_WANDB = False
 
+if torch.cuda.is_available():
+  torch.backends.cudnn.benchmark = True
+  device = 'cuda'
+else:
+  device = 'cpu'
+
 
 class Net(nn.Module):
-    def __init__(self, encoder, num_class):
+    def __init__(self, encoder, num_class, fname_linear_cls=''):
         super(Net, self).__init__()
 
         # encoder
         self.f = encoder
         # classifier
-        self.fc = nn.Linear(2048, num_class, bias=True)
+        # self.fc = nn.Linear(2048, num_class, bias=True)
+        # classifier
+        if fname_linear_cls != '':
+          linear_state_dict = torch.load(fname_linear_cls, map_location='cpu')
+          # self.sanity_cls_weight, self.sanity_cls_bias = linear_state_dict['fc.weight'].clone().to(device), linear_state_dict['fc.bias'].clone().to(device)
+          self.cls_weight, self.cls_bias = linear_state_dict['fc.weight'], linear_state_dict['fc.bias']
+          self.cls_weight.requires_grad, self.cls_bias.requires_grad = False, False
+          self.cls_weight, self.cls_bias = self.cls_weight.to(device), self.cls_bias.to(device)
+          self.cls_weight = torch.nn.parameter.Parameter(self.cls_weight)
+          self.cls_bias = torch.nn.parameter.Parameter(self.cls_bias)
+
+          self.fc = nn.Linear(2048, 2048, bias=True)
+        else:
+          self.cls_weight, self.cls_bias = None, None
+          self.fc = nn.Linear(2048, num_class, bias=True)
 
     def forward(self, x):
         x = self.f(x, return_projection = False)
+        # pdb.set_trace()
         feature = torch.flatten(x, start_dim=1)
         out = self.fc(feature)
         return out
@@ -75,18 +96,19 @@ def train_val(net, data_loader, train_optimizer):
                                              model_path.split('/')[-1]))
 
             bt_cnt += 1
-            if is_train:
-              wandb.log({
-                'loss':loss.item(),
-                'linear_total_correct_1': total_correct_1 / total_num * 100,
-                'linear_total_correct_5': total_correct_5 / total_num * 100,
-                })
-            else:
-              wandb.log({
-                'val_loss':loss.item(),
-                'val_linear_total_correct_1': total_correct_1 / total_num * 100,
-                'val_linear_total_correct_5': total_correct_5 / total_num * 100,
-                })
+            if USE_WANDB and bt_cnt % 20 == 0:
+              if is_train:
+                wandb.log({
+                  'loss':loss.item(),
+                  'linear_total_correct_1': total_correct_1 / total_num * 100,
+                  'linear_total_correct_5': total_correct_5 / total_num * 100,
+                  })
+              else:
+                wandb.log({
+                  'val_loss':loss.item(),
+                  'val_linear_total_correct_1': total_correct_1 / total_num * 100,
+                  'val_linear_total_correct_5': total_correct_5 / total_num * 100,
+                  })
     return total_loss / total_num, total_correct_1 / total_num * 100, total_correct_5 / total_num * 100
 
 
@@ -95,6 +117,7 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', default='cifar10', type=str, help='Dataset: cifar10 or tiny_imagenet or stl10')
     parser.add_argument('--model_path', type=str, default='results/Barlow_Twins/0.005_64_128_model.pth',
                         help='The base string of the pretrained model path')
+    parser.add_argument('--fname-linear-cls', type=str, default='', help="File name of the ckpt that will provide a linear layer.")
     parser.add_argument('--batch_size', type=int, default=512, help='Number of images in each mini-batch')
     parser.add_argument('--epochs', type=int, default=200, help='Number of sweeps over the dataset to train')
     parser.add_argument('--image_size', default=32, type=int, help='Size of image')
@@ -112,8 +135,12 @@ if __name__ == '__main__':
     parser.add_argument('--project', default='nonContrastive')
     parser.add_argument('--wb-name', default='default', type=str,
                         help="Run name for wandb.")
+    parser.add_argument('--wb-token', default='default', type=str)
     parser.add_argument('--wb-proj-type', default='byol', type=str,
                         help="For wandb filtering.")
+    parser.add_argument('--overwrite', type=int, default=0,
+                        help="Whether to overwrite an existing directory.")
+
 
     args = parser.parse_args()
     model_path, batch_size, epochs = args.model_path, args.batch_size, args.epochs
@@ -181,7 +208,7 @@ if __name__ == '__main__':
       byol.load_state_dict(loaded_dict, strict=False)
         # byol.load_state_dict(loaded_dict, strict=True)
 
-    model = Net(num_class=len(train_data.classes), encoder=byol.online_encoder).cuda()
+    model = Net(num_class=len(train_data.classes), encoder=byol.online_encoder, fname_linear_cls=args.fname_linear_cls).cuda()
     for param in model.f.parameters():
         param.requires_grad = False
 
@@ -196,7 +223,15 @@ if __name__ == '__main__':
     results = {'train_loss': [], 'train_acc@1': [], 'train_acc@5': [],
                'test_loss': [], 'test_acc@1': [], 'test_acc@5': []}
 
-    save_name = model_path.split('.pth')[0] + '_linear.csv'
+    os.makedirs('results_linear/', exist_ok=1)
+    os.makedirs('results_linear/csv', exist_ok=1)
+    save_name_csv = os.path.join('results_linear/csv', args.wb_name+'_linear.csv')
+    save_name_model = os.path.join('results_linear', args.wb_name+'_linear_model.pth')
+    if os.path.exists(save_name_model) and not args.overwrite:
+      cont = input(f"File exists: {save_name_model}. \n Continue? (y/N)")
+      if 'y' not in cont and 'Y' not in cont:
+        print("Exiting. Bye!")
+        exit()
 
     best_acc = 0.0
     early_stop_cnt = 0
@@ -214,10 +249,10 @@ if __name__ == '__main__':
 
         # save statistics
         data_frame = pd.DataFrame(data=results, index=range(1, epoch + 1))
-        data_frame.to_csv(save_name, index_label='epoch')
-        #if test_acc_1 > best_acc:
-        #    best_acc = test_acc_1
-        #    torch.save(model.state_dict(), 'results/linear_model.pth')
+        data_frame.to_csv(save_name_csv, index_label='epoch')
+        if test_acc_1 > best_acc:
+            best_acc = test_acc_1
+            torch.save(model.state_dict(), save_name_model)
         if USE_WANDB:
           wandb.log({
             'train_loss': train_loss,

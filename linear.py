@@ -57,7 +57,8 @@ class Net(nn.Module):
         else:
           self.cls_weight, self.cls_bias = None, None
           self.fc = nn.Linear(2048, num_class, bias=True)
-        self.load_state_dict(torch.load(pretrained_path, map_location='cpu'), strict=False)
+        loaded_dict = torch.load(pretrained_path, map_location='cpu')
+        self.load_state_dict(loaded_dict, strict=False)
 
     def forward(self, x):
         x = self.f(x)
@@ -135,6 +136,7 @@ if __name__ == '__main__':
     parser.add_argument('--project', default='nonContrastive')
     parser.add_argument('--wb-name', default='default', type=str,
                         help="Run name for wandb.")
+    parser.add_argument('--wb-token', default='default', type=str)
     parser.add_argument('--wb-proj-type', default='barlow', type=str,
                         help="For wandb filtering.")
     parser.add_argument('--overwrite', type=int, default=0,
