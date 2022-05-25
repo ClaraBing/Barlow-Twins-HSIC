@@ -10,6 +10,8 @@ matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 # from seaborn import heatmap
 
+from sklearn.cross_decomposition import CCA
+
 import pdb
 
 
@@ -24,7 +26,8 @@ VERBOSE_TRAIN = 0
 FIG_DIR='figs/align/'
 
 
-def train_gd(max_num_epochs, X, Y, optimizer_type, lr, momentum, log_interval=10):
+def train_gd(max_num_epochs, X, Y, optimizer_type, lr, momentum, log_interval=10,
+      l1_reg=0, l2_reg=0, abs_reg=0):
     if VERBOSE_TRAIN:
       print(f"\n optimizer_type=={optimizer_type}, lr=={lr}, momentum=={momentum}\n")
 
@@ -49,12 +52,19 @@ def train_gd(max_num_epochs, X, Y, optimizer_type, lr, momentum, log_interval=10
     for epoch in range(max_num_epochs):
         optimizer.zero_grad()
         loss = torch.norm(X @ A + b - Y)
+        loss_history.append(float(loss))
+
+        if l1_reg > 0:
+          loss = loss + l1_reg * (torch.norm(A, 1) + torch.norm(b, 1))
+        if l2_reg > 0:
+          loss = loss + l2_reg * (torch.norm(A) + torch.norm(b))
+        if abs_reg > 0:
+          loss = loss + abs_reg * (A.abs().sum() + b.abs().sum())
         if epoch % log_interval == 0 and VERBOSE_TRAIN:
             print(f"Epoch {epoch}, loss {loss}")
         if len(loss_history) >= 1 and loss < min(loss_history):
             A_optimal = A.detach().cpu().numpy()
             b_optimal = b.detach().cpu().numpy()
-        loss_history.append(float(loss))
         loss.backward()
         optimizer.step()
     
@@ -83,7 +93,8 @@ def plot_results(A_optimal, b_optimal, fname='align_sVals.png'):
     print('b_norm', np.linalg.norm(b_optimal))
 
 
-def check_alignment(features_file1, features_file2, layer_key, fname=''):
+def check_alignment(features_file1, features_file2, layer_key, fname='',
+      method='GD', l1_reg=0, l2_reg=0, abs_reg=0):
     assert layer_key in ['outs', 'feats']  # 'outs' is 128-dim, 'feats' means 2048-dim
 
     with h5py.File(features_file1, "r") as f:
@@ -91,49 +102,61 @@ def check_alignment(features_file1, features_file2, layer_key, fname=''):
 
     with h5py.File(features_file2, "r") as f:
         features2 = np.array(f[layer_key])
-    
-    # Try multiple optimizer settings
-    optimizer_settings = []
-    for lr in [0.3, 0.1, 0.03, 0.001]:
-        for momentum in [0.9, 0.3, 0.1, 0.0]:
-            optimizer_settings.append((torch.optim.SGD, lr, momentum))
-    for lr in [0.3, 0.1, 0.03, 0.001]:
-        optimizer_settings.append((torch.optim.Adam, lr, None))
-
-    results = {}
-    max_num_epochs = 200
-    for optimizer_type, lr, momentum in optimizer_settings:
-        loss_history, A_optimal, b_optimal = train_gd(max_num_epochs, features1, features2, optimizer_type, lr, momentum, log_interval=20)
-        results[(optimizer_type, lr, momentum)] = {
-                'min_loss': min(loss_history),
-                'num_epochs': len(loss_history),
-                'A_optimal': A_optimal,
-                'b_optimal': b_optimal,
-            }
-    
-    # Select the best
-    min_loss = float("inf")
-    best_hyperparam = None
-    A_optimal, b_optimal = (None, None)
-
-    for hyperparam in results.keys():
-        result = results[hyperparam]
-        if result['min_loss'] < min_loss:
-            min_loss = result['min_loss']
-            A_optimal = result['A_optimal']
-            b_optimal = result['b_optimal']
-            best_hyperparam = hyperparam 
-
     unaligned_loss = np.linalg.norm(features1 - features2)
-    print('best_hyperparam: (optimizer_type, lr, momentum) = ', best_hyperparam)
-    print('Unaligned loss:\t', unaligned_loss)
-    print('min_loss:\t', min_loss)
-    if VERBOSE:
-      print('A_optimal', A_optimal)
-      print('b_optimal', b_optimal)
+    
+    if method == 'CCA':
+      # CCA
+      cca = CCA(features1.shape[1])
+      cca.fit(features1, features2)
+      X, Y = cca.transform(features1, features2)
+      loss = np.linalg.norm(X - Y)
+      print('Unaligned loss:\t', unaligned_loss)
+      print('loss (CCA):\t', loss)
+      pdb.set_trace()
 
-    if fname:
-      plot_results(A_optimal, b_optimal, fname)
+    elif method == 'GD':
+      # GD: Try multiple optimizer settings
+      optimizer_settings = []
+      for lr in [0.3, 0.1, 0.03, 0.001]:
+          for momentum in [0.9, 0.3, 0.1, 0.0]:
+              optimizer_settings.append((torch.optim.SGD, lr, momentum))
+      for lr in [0.3, 0.1, 0.03, 0.001]:
+          optimizer_settings.append((torch.optim.Adam, lr, None))
+
+      results = {}
+      max_num_epochs = 200
+      for optimizer_type, lr, momentum in optimizer_settings:
+          loss_history, A_optimal, b_optimal = train_gd(max_num_epochs, features1, features2, optimizer_type, lr, momentum,
+              log_interval=20, l1_reg=l1_reg, l2_reg=l2_reg, abs_reg=abs_reg)
+          results[(optimizer_type, lr, momentum)] = {
+                  'min_loss': min(loss_history),
+                  'num_epochs': len(loss_history),
+                  'A_optimal': A_optimal,
+                  'b_optimal': b_optimal,
+              }
+      
+      # Select the best
+      min_loss = float("inf")
+      best_hyperparam = None
+      A_optimal, b_optimal = (None, None)
+
+      for hyperparam in results.keys():
+          result = results[hyperparam]
+          if result['min_loss'] < min_loss:
+              min_loss = result['min_loss']
+              A_optimal = result['A_optimal']
+              b_optimal = result['b_optimal']
+              best_hyperparam = hyperparam 
+
+      print('best_hyperparam: (optimizer_type, lr, momentum) = ', best_hyperparam)
+      print('Unaligned loss:\t', unaligned_loss)
+      print('min_loss:\t', min_loss)
+      if VERBOSE:
+        print('A_optimal', A_optimal)
+        print('b_optimal', b_optimal)
+
+      if fname:
+        plot_results(A_optimal, b_optimal, fname)
 
 def May11():
   if 0:
@@ -186,15 +209,26 @@ def May11():
     f2 = 'saved_feats/dim128_lmbda0.005_bt128_sameInit_test.h5' 
     fname = os.path.join(FIG_DIR, 'byol2_vs_BTlmdba0.005.png')
 
+  l1_reg = 0 
+  l2_reg = 0
+  abs_reg = 0
+  if l1_reg > 0:
+    fname = fname.replace('.png', f'_l1{l1_reg}.png')
+  if l2_reg > 0:
+    fname = fname.replace('.png', f'_l2{l2_reg}.png')
+  if abs_reg > 0:
+    fname = fname.replace('.png', f'_abs{abs_reg}.png')
   print(fname.replace('.png', ''))
+
+  method = 'CCA'
 
   # ## 128-dim
   print("Outs (dim 128)")
-  check_alignment(f1, f2, 'outs', fname=fname)
+  check_alignment(f1, f2, 'outs', fname=fname, l1_reg=l1_reg, l2_reg=l2_reg, abs_reg=abs_reg, method=method)
 
   # ## 2048-dim
-  print("\nFeats (dim 2048)")
-  check_alignment(f1, f2, 'feats', fname=fname)
+  # print("\nFeats (dim 2048)")
+  # check_alignment(f1, f2, 'feats', fname=fname, l1_reg=l1_reg, l2_reg=l2_reg, abs_reg=abs_reg, method=method)
 
 if 0:
   # # lambda = 0.005 same init different runs
