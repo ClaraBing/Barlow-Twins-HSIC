@@ -112,8 +112,8 @@ def str2bool(v):
 
 def check_stable_ranks(ffeats):
   with h5py.File(ffeats, "r") as f:
-      outs = np.array(f['outs'])
-      feats = np.array(f['feats'])
+    outs = np.array(f['outs'])
+    feats = np.array(f['feats'])
 
   _, ss_outs, _ = np.linalg.svd(outs)
   stable_rank_outs = ss_outs.sum() / ss_outs.max()
@@ -122,15 +122,42 @@ def check_stable_ranks(ffeats):
   print('Stable ranks for', ffeats)
   print('lF/l2:\t outs: {:.3f} / feats: {:.3f}'.format(stable_rank_outs, stable_rank_feats))
   print('(lF/l2)^2:\t outs: {:.3f} / feats: {:.3f}'.format(stable_rank_outs**2, stable_rank_feats**2))
-  
+
+def check_feats_vs_cls(ffeats, fcls):
+  with h5py.File(ffeats, "r") as f:
+    # shape: n_pts x feat_dim
+    feats = np.array(f['feats'])
+  loaded_sd = torch.load(fcls)
+  # shape: n_cls x feat_dim
+  clsW = loaded_sd['fc.weight'].cpu().numpy()
+
+  Uf, ssf, Vf = np.linalg.svd(feats, full_matrices=0)
+  Uc, ssc, Vc = np.linalg.svd(clsW, full_matrices=0)
+  prod = (np.diag(ssc).dot(Vc)).dot((np.diag(ssf).dot(Vf)).T)
+  _, ss_prod, _ = np.linalg.svd(prod)
+
+  stable_rank_feats = ssf.sum() / ssf.max()
+  stable_rank_cls = ssc.sum() / ssc.max()
+  stable_rank_prod = ss_prod.sum() / ss_prod.max()
+  trace_prod = ss_prod.sum()
+
+  print(f"Stable rank for:\n\t {os.path.basename(ffeats)}\n\t {os.path.basename(fcls)}")
+  print(f"Feats: stable rank: {stable_rank_feats:.2e} / smax:{ssf.max():.2e} / smin:{ssf.min():.2e}")
+  print(f"Cls: stable rank: {stable_rank_cls:.2e} / smax:{ssc.max():.2e} / smin:{ssc.min():.2e}")
+  print(f'stable_rank_prod: {stable_rank_prod:.2e} / smax:{ss_prod.max():.2e} / smin:{ss_prod.min():.2e}')
+  print(f"trace prod: {trace_prod:.2e}")
+  print()
+  pdb.set_trace()
 
 if __name__ == '__main__':
   import os
   import h5py
   import numpy as np
   from glob import glob
+  import torch
+  import pdb
 
-  if 1:
+  if 0:
     # check the stable ranks for all features
     ffeats_list = glob('saved_feats/*')
     print(f"{len(ffeats_list)} features to check.")
@@ -139,4 +166,24 @@ if __name__ == '__main__':
         continue
       check_stable_ranks(ffeats)
       print()
+
+  if 1:
+    ffeats_lst = [
+      'dim128_lmbda0.005_bt128_sameInit2_test.h5', # lmbda=0.005
+      'dim128_lmbda0.05_bt128_test.h5', # lmbda=0.05
+      'byol_dim128_lmbda0.005_bt128_test_Ashwini.h5', # BYOL
+    ]
+    fcls_lst = [
+      'cifar10_linear_linear_feat128_lmbda0.005_lr1e-4_wd1e-5_bt128_sameInit2_linear_model.pth', # lmbda=0.005
+      'cifar10_linear_linear_feat128_lmbda0.05_lr3e-4_wd1e-5_bt128_linear_model.pth', # lmbda=0.05
+      'byol_cifar10_linear_linear_noBNReLU_feat512_lr1e-3_wd1e-5_bt128_linear_model.pth' # BYOL
+    ]
+    for ffeats in ffeats_lst:
+      for fcls in fcls_lst:
+        ffeats_full = os.path.join('saved_feats', ffeats)
+        fcls_full = os.path.join('results_linear', fcls)
+        check_feats_vs_cls(ffeats_full, fcls_full)
+        print('\n\n')
+
+
 

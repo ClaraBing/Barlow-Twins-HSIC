@@ -22,13 +22,17 @@ norm_std=1
 if [ $norm_std = 0 ]; then
   token=$token'_noNormStd'
 fi
+norm_l2=0
+if [ $norm_lr = 0 ]; then
+  token=$token'_noNormL2'
+fi
 
 load_ckpt=0
 model_dir='results/'
-pretrained_path='cifar10_linear_feat128_lmbda0.005_lr1e-3_wd1e-6_bt128_model_init.pth'
+pretrained_path='cifar10_linear_feat128_lmbda0.005_lr1e-3_wd1e-6_bt128_tmp_model_init.pth'
 pretrained_path=$model_dir$pretrained_path
-token='_sameInit'
-token='_tmp'
+token=$token'_diffInit'
+# token=$token'_tmp'
 
 bt=128
 
@@ -38,13 +42,13 @@ for wd in 1e-6
 do
 for feature_dim in 128
 do
-for lambda in 0.005
+for lambda in 5e-3
 do
 
 wb_name=$dataset'_'$proj_head_type'_feat'$feature_dim'_lmbda'$lambda'_lr'$lr'_wd'$wd'_bt'$bt$token
 
 WANDB_MODE=dryrun \
-CUDA_VISIBLE_DEVICES=0 \
+CUDA_VISIBLE_DEVICES=1 \
   python main.py \
     --dataset=$dataset \
     --corr_neg_one_on_diag=$corr_neg_one_on_diag \
